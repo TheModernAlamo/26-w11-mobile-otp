@@ -837,6 +837,86 @@
 .log-success { color: #34d399; }
 .log-warning { color: #fbbf24; }
 .log-danger { color: #f87171; }
+.log-special {
+  color: #f43f5e;
+  background: rgba(244, 63, 94, 0.08);
+  border-left: 3px solid #f43f5e;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  text-shadow: 0 0 10px rgba(244, 63, 94, 0.3);
+  margin: 2px 0;
+}
+
+/* 검증 실패 세부 배너 스타일 */
+.alert-content-fail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.fail-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fail-category-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.category-expired {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.category-clock_ahead {
+  background: rgba(234, 179, 8, 0.2);
+  color: #facc15;
+  border: 1px solid rgba(234, 179, 8, 0.4);
+}
+
+.category-mismatch {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.special-alert-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(244, 63, 94, 0.2);
+  color: #fda4af;
+  border: 1px solid rgba(244, 63, 94, 0.5);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  animation: pulse-dot 1.5s infinite;
+}
+
+.fail-reason-text {
+  font-size: 12px;
+  color: #f1f5f9;
+  line-height: 1.4;
+}
+
+.consecutive-fail-warn {
+  font-size: 11px;
+  color: #fda4af;
+  background: rgba(244, 63, 94, 0.1);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border-left: 2px solid #f43f5e;
+}
 
 /* ================= SECURITY CHECKPOINT STYLES ================= */
 .security-container {

@@ -23,7 +23,8 @@ import {
   HelpCircle,
   ChevronDown,
   ChevronUp,
-  RotateCcw
+  RotateCcw,
+  AlertTriangle
 } from 'lucide-react'
 import './App.css'
 
@@ -125,36 +126,90 @@ async function computeTOTP(secretBase32, timeStep) {
 }
 
 /**
- * ±1 스텝 시계 오차(Clock-Drift) 허용 검증 (RFC 6238)
- * T-1 (과거 30초), T (현재), T+1 (미래 30초) 구간 확인
+ * 정밀 진단 TOTP 검증 함수
+ * 1. 유효 범위: T, T-1, T+1 (±1 스텝 허용)
+ * 2. 실패 시 정밀 분류:
+ *    - 과거 스텝(T-2 ~ T-10) 일치 시: '인증 시간 초과 (EXPIRED)'
+ *    - 미래 스텝(T+2 ~ T+10) 일치 시: '기기 시계 불일치 (CLOCK_AHEAD)'
+ *    - 어디에도 없음: '코드 완전 불일치 (MISMATCH)'
+ * 3. 2 또는 그 이상 불연속 (|Δ| >= 2) 여부 판정
  */
-async function verifyTOTPCode(inputCode, secretBase32, currentStep) {
+async function verifyTOTPCodeDetailed(inputCode, secretBase32, currentStep) {
   const cleanCode = inputCode.trim()
   if (cleanCode.length !== 6 || !/^\d{6}$/.test(cleanCode)) {
-    return { valid: false, reason: '6자리 숫자를 입력하세요.' }
+    return {
+      valid: false,
+      type: 'INVALID_FORMAT',
+      reason: '6자리 숫자를 입력하세요.',
+      delta: null,
+      absDelta: 0,
+      isDiscontinuous: false
+    }
   }
 
-  const stepsToCheck = [
+  // 1. 유효 범위 검사 (오차 0초, -30초, +30초)
+  const validSteps = [
     { step: currentStep, delta: 0, label: '현재 구간 (오차 0초)' },
-    { step: currentStep - 1, delta: -30, label: '직전 구간 (시계 지연 -30초 허용)' },
-    { step: currentStep + 1, delta: +30, label: '다음 구간 (시계 빠름 +30초 허용)' }
+    { step: currentStep - 1, delta: -1, label: '직전 구간 (시계 지연 -30초 허용)' },
+    { step: currentStep + 1, delta: +1, label: '다음 구간 (시계 빠름 +30초 허용)' }
   ]
 
-  for (const item of stepsToCheck) {
+  for (const item of validSteps) {
     const computed = await computeTOTP(secretBase32, item.step)
     if (computed === cleanCode) {
       return {
         valid: true,
+        type: 'SUCCESS',
         matchedStep: item.step,
         delta: item.delta,
-        label: item.label
+        absDelta: Math.abs(item.delta),
+        label: item.label,
+        isDiscontinuous: false
       }
     }
   }
 
+  // 2. 실패 시 정밀 진단: 과거(-2 ~ -10) 또는 미래(+2 ~ +10) 타임스텝 검사
+  for (let delta = -10; delta <= 10; delta++) {
+    if (delta >= -1 && delta <= 1) continue // 유효 범위는 건너뜀
+    const checkStep = currentStep + delta
+    const computed = await computeTOTP(secretBase32, checkStep)
+
+    if (computed === cleanCode) {
+      const absDelta = Math.abs(delta)
+      if (delta < 0) {
+        return {
+          valid: false,
+          type: 'EXPIRED',
+          delta,
+          absDelta,
+          isDiscontinuous: absDelta >= 2,
+          reason: `인증 시간 초과: ${absDelta * 30}초 전에 만료된 이전 코드입니다. (${absDelta}스텝 과거)`,
+          label: `만료된 과거 코드 (${absDelta * 30}초 경과)`
+        }
+      } else {
+        return {
+          valid: false,
+          type: 'CLOCK_AHEAD',
+          delta,
+          absDelta,
+          isDiscontinuous: absDelta >= 2,
+          reason: `기기 시계 불일치: ${delta * 30}초 후의 미래 코드입니다. 스마트폰의 시간을 확인하세요. (${delta}스텝 빠름)`,
+          label: `미래 코드 (${delta * 30}초 선행)`
+        }
+      }
+    }
+  }
+
+  // 3. 어디에도 일치하지 않는 경우 -> 완전 코드 불일치 (오타 또는 잘못된 키)
   return {
     valid: false,
-    reason: '인증 번호가 일치하지 않거나 30초 유효 기간이 만료되었습니다.'
+    type: 'MISMATCH',
+    delta: null,
+    absDelta: 0,
+    isDiscontinuous: false,
+    reason: '인증 번호 불일치: 입력한 6자리 번호가 전혀 일치하지 않습니다. (오타 또는 계정 확인 필요)',
+    label: '코드 불일치'
   }
 }
 
@@ -176,6 +231,9 @@ export default function App() {
   // 3. 30초 쿨다운 & 재발급 타이머 상태
   const [keyGeneratedAt, setKeyGeneratedAt] = useState(() => Date.now())
   const [keyCooldown, setKeyCooldown] = useState(30)
+
+  // 연속 실패 횟수 추적 (불연속성 및 브루트포스 감지용)
+  const [consecutiveFailures, setConsecutiveFailures] = useState(0)
 
   // 현재 타임스텝 (내부 검증용 백그라운드 동기화)
   const [currentStep, setCurrentStep] = useState(() => Math.floor(Date.now() / 1000 / 30))
@@ -218,6 +276,7 @@ export default function App() {
     setKeyGeneratedAt(Date.now())
     setKeyCooldown(30)
     setVerificationResult(null)
+    setConsecutiveFailures(0)
     setAuditLogs((prev) => [
       {
         id: Date.now(),
@@ -278,7 +337,6 @@ export default function App() {
       return
     }
 
-    // 붙여넣기 등 다중 입력
     if (cleanVal.length > 1) {
       handleOtpPaste(cleanVal)
       return
@@ -325,12 +383,13 @@ export default function App() {
     }, 100)
   }
 
-  // 2FA 검증 수행
+  // 2FA 정밀 검증 및 특수 로그 처리 수행
   const executeVerification = async () => {
     const fullCode = otpInputs.join('')
     if (fullCode.length !== 6) {
       setVerificationResult({
         valid: false,
+        type: 'INVALID_FORMAT',
         reason: '6자리 인증 코드를 모두 입력해 주세요.'
       })
       return
@@ -340,14 +399,19 @@ export default function App() {
     setVerificationResult(null)
 
     setTimeout(async () => {
-      const result = await verifyTOTPCode(fullCode, secretKey, currentStep)
+      const result = await verifyTOTPCodeDetailed(fullCode, secretKey, currentStep)
       setIsVerifying(false)
       setVerificationResult(result)
 
+      const timeStr = new Date().toLocaleTimeString()
+
       if (result.valid) {
+        // 성공 시 실패 카운트 리셋
+        setConsecutiveFailures(0)
+
         const newSession = {
           user: username,
-          authenticatedAt: new Date().toLocaleTimeString(),
+          authenticatedAt: timeStr,
           matchedWindow: result.label,
           sessionToken: 'zeroauth_' + Math.random().toString(36).substring(2, 10),
           zeroTransmissionVerified: true
@@ -357,8 +421,8 @@ export default function App() {
         setAuditLogs((prev) => [
           {
             id: Date.now(),
-            timestamp: new Date().toLocaleTimeString(),
-            event: `2단계 인증 성공 (${result.label}): 스마트폰 OTP 검증 통과 - 사용자 [${username}] 인가`,
+            timestamp: timeStr,
+            event: `[인증 성공] 2단계 OTP 검증 통과 (${result.label}) - 사용자 [${username}] 보안 인가`,
             status: 'success'
           },
           ...prev
@@ -368,15 +432,57 @@ export default function App() {
           setLoginStage('dashboard')
         }, 700)
       } else {
-        setAuditLogs((prev) => [
-          {
+        // 실패 카운트 증가
+        const newFailCount = consecutiveFailures + 1
+        setConsecutiveFailures(newFailCount)
+
+        const newLogs = []
+
+        // 1. 기본 실패 로그 (불일치 vs 시간 초과 구분)
+        if (result.type === 'EXPIRED') {
+          newLogs.push({
             id: Date.now(),
-            timestamp: new Date().toLocaleTimeString(),
-            event: `2단계 인증 실패: 입력 코드 [${fullCode}] 불일치 또는 유효 시간 초과`,
+            timestamp: timeStr,
+            event: `[인증 실패: 시간 초과] 입력 코드 [${fullCode}] 유효 시간 만료 (${result.absDelta * 30}초 전 만료된 이전 코드)`,
+            status: 'warning'
+          })
+        } else if (result.type === 'CLOCK_AHEAD') {
+          newLogs.push({
+            id: Date.now(),
+            timestamp: timeStr,
+            event: `[인증 실패: 시계 불일치] 입력 코드 [${fullCode}] 미래 시간대 코드 (${result.delta * 30}초 선행 - 단말기 시계 오차)`,
+            status: 'warning'
+          })
+        } else {
+          newLogs.push({
+            id: Date.now(),
+            timestamp: timeStr,
+            event: `[인증 실패: 코드 불일치] 유효하지 않은 코드 [${fullCode}] 입력 (키 불일치 또는 오타)`,
             status: 'danger'
-          },
-          ...prev
-        ])
+          })
+        }
+
+        // 2. 특수 로그 1: 2스텝 또는 그 이상의 시간 불연속 발생 시
+        if (result.isDiscontinuous) {
+          newLogs.unshift({
+            id: Date.now() + 1,
+            timestamp: timeStr,
+            event: `🚨 [특수 감사 로그: ${result.absDelta}스텝 시간 불연속(Discontinuity) 감지] 현재 에포크 T=${currentStep} 대비 편차 Δ=${result.delta > 0 ? '+' : ''}${result.delta} (${result.absDelta * 30}초 격차) - ${result.type === 'EXPIRED' ? '만료된 과거 토큰 지연 입력' : '비정상 미래 시간대 접근'}`,
+            status: 'special'
+          })
+        }
+
+        // 3. 특수 로그 2: 2회 이상 연속 실패(불연속적 인증 오류) 감지 시
+        if (newFailCount >= 2) {
+          newLogs.unshift({
+            id: Date.now() + 2,
+            timestamp: timeStr,
+            event: `🚨 [특수 감사 로그: 연속 ${newFailCount}회 인증 실패 감지] 단기간 연속 실패 발생 - 무차별 대입(Brute-Force) 공격 의심 또는 세션 이상 감지`,
+            status: 'special'
+          })
+        }
+
+        setAuditLogs((prev) => [...newLogs, ...prev])
       }
     }, 200)
   }
@@ -387,6 +493,7 @@ export default function App() {
     setSessionData(null)
     setVerificationResult(null)
     setOtpInputs(['', '', '', '', '', ''])
+    setConsecutiveFailures(0)
     setAuditLogs((prev) => [
       {
         id: Date.now(),
@@ -505,7 +612,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 1. '스캔이 안 되나요?' 토글 버튼 (누른 사람에게만 Secret Key 노출) */}
+                {/* 1. '스캔이 안 되나요?' 토글 버튼 */}
                 <div className="scan-trouble-box">
                   <button
                     type="button"
@@ -728,7 +835,7 @@ export default function App() {
                       </span>
                     </div>
 
-                    {/* 검증 결과 알림 배너 */}
+                    {/* 검증 결과 알림 배너 (불일치 vs 시간 초과 구분 & 특수 경고) */}
                     {verificationResult && (
                       <div
                         className={`alert-banner ${
@@ -737,7 +844,7 @@ export default function App() {
                       >
                         {verificationResult.valid ? (
                           <>
-                            <ShieldCheck size={20} />
+                            <ShieldCheck size={22} />
                             <div>
                               <strong>인증 성공!</strong>
                               <p>{verificationResult.label}에서 일치 확인되었습니다.</p>
@@ -745,10 +852,31 @@ export default function App() {
                           </>
                         ) : (
                           <>
-                            <ShieldAlert size={20} />
-                            <div>
-                              <strong>인증 실패</strong>
-                              <p>{verificationResult.reason}</p>
+                            <ShieldAlert size={22} />
+                            <div className="alert-content-fail">
+                              <div className="fail-badge-row">
+                                <span className={`fail-category-badge category-${verificationResult.type.toLowerCase()}`}>
+                                  {verificationResult.type === 'EXPIRED' && '⏱️ 인증 시간 초과 (Expired)'}
+                                  {verificationResult.type === 'CLOCK_AHEAD' && '⏰ 기기 시계 불일치 (Ahead)'}
+                                  {verificationResult.type === 'MISMATCH' && '❌ 인증 번호 불일치 (Mismatch)'}
+                                  {verificationResult.type === 'INVALID_FORMAT' && '⚠️ 형식 오류'}
+                                </span>
+
+                                {verificationResult.isDiscontinuous && (
+                                  <span className="special-alert-chip">
+                                    <AlertTriangle size={12} /> {verificationResult.absDelta}스텝 불연속 특수 로그 기록됨
+                                  </span>
+                                )}
+                              </div>
+
+                              <p className="fail-reason-text">{verificationResult.reason}</p>
+
+                              {consecutiveFailures >= 2 && (
+                                <p className="consecutive-fail-warn">
+                                  🚨 연속 {consecutiveFailures}회 실패 감지: 보안 감사 로그에 특수 경보가 생성되었습니다.
+                                </p>
+                              )}
+
                               {/* 실패 시 재시도 안내 */}
                               <button
                                 type="button"
