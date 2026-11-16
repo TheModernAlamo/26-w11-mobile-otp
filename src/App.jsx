@@ -35,8 +35,8 @@ import './App.css'
 const BASE32_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
 
 /**
- * 암호학적 안전 난수 생성 (window.crypto.getRandomValues)
- * 160비트(20바이트) 엔트로피 풀을 사용해 Base32 비밀 키 생성
+ * Generate cryptographically secure random entropy (window.crypto.getRandomValues)
+ * Uses 160 bits (20 bytes) of entropy to generate a Base32 secret key.
  */
 function generateBase32Secret(byteLength = 20) {
   const bytes = new Uint8Array(byteLength)
@@ -61,7 +61,7 @@ function generateBase32Secret(byteLength = 20) {
 }
 
 /**
- * Base32 문자열을 바이트 배열(Uint8Array)로 디코딩
+ * Decode Base32 string into Uint8Array byte array
  */
 function base32ToBytes(base32Str) {
   const cleanStr = base32Str.toUpperCase().replace(/=+$/, '').replace(/\s+/g, '')
@@ -83,8 +83,8 @@ function base32ToBytes(base32Str) {
 }
 
 /**
- * 특정 타임스텝(timeStep)에 대한 6자리 TOTP 코드 연산 (RFC 6238 / RFC 4226)
- * Web Crypto API (HMAC-SHA1) 활용 - 검증 시 백그라운드에서만 수행됨
+ * Compute 6-digit TOTP code for a specific time-step (RFC 6238 / RFC 4226)
+ * Uses Web Crypto API (HMAC-SHA1) in the background during verification.
  */
 async function computeTOTP(secretBase32, timeStep) {
   try {
@@ -99,16 +99,16 @@ async function computeTOTP(secretBase32, timeStep) {
       ['sign']
     )
 
-    // 64비트(8바이트) 빅엔디안 카운터 버퍼 구성
+    // Construct 64-bit (8-byte) big-endian counter buffer
     const counterBuffer = new ArrayBuffer(8)
     const dataView = new DataView(counterBuffer)
     dataView.setBigUint64(0, BigInt(timeStep), false)
 
-    // HMAC-SHA1 서명 생성
+    // Generate HMAC-SHA1 signature
     const signature = await window.crypto.subtle.sign('HMAC', cryptoKey, counterBuffer)
     const hmac = new Uint8Array(signature)
 
-    // Dynamic Truncation (동적 절단, RFC 4226)
+    // Dynamic Truncation (RFC 4226)
     const offset = hmac[hmac.length - 1] & 0x0f
     const binary =
       ((hmac[offset] & 0x7f) << 24) |
@@ -116,23 +116,23 @@ async function computeTOTP(secretBase32, timeStep) {
       ((hmac[offset + 2] & 0xff) << 8) |
       (hmac[offset + 3] & 0xff)
 
-    // 6자리 코드 추출
+    // Extract 6-digit code
     const otp = (binary % 1000000).toString().padStart(6, '0')
     return otp
   } catch (err) {
-    console.error('TOTP 연산 오류:', err)
+    console.error('TOTP computation error:', err)
     return '------'
   }
 }
 
 /**
- * 정밀 진단 TOTP 검증 함수
- * 1. 유효 범위: T, T-1, T+1 (±1 스텝 허용)
- * 2. 실패 시 정밀 분류:
- *    - 과거 스텝(T-2 ~ T-10) 일치 시: '인증 시간 초과 (EXPIRED)'
- *    - 미래 스텝(T+2 ~ T+10) 일치 시: '기기 시계 불일치 (CLOCK_AHEAD)'
- *    - 어디에도 없음: '코드 완전 불일치 (MISMATCH)'
- * 3. 2 또는 그 이상 불연속 (|Δ| >= 2) 여부 판정
+ * Detailed TOTP verification with diagnostic classification:
+ * 1. Valid range: T, T-1, T+1 (+/- 1 time-step clock-drift tolerance)
+ * 2. Failure classification:
+ *    - Historical step (T-2 to T-10): 'EXPIRED' (Time Expired)
+ *    - Future step (T+2 to T+10): 'CLOCK_AHEAD' (Device Clock Out-of-Sync)
+ *    - Not found in extended window: 'MISMATCH' (Code Mismatch / Typo)
+ * 3. Discontinuity detection: |delta| >= 2 (2 or more step gap)
  */
 async function verifyTOTPCodeDetailed(inputCode, secretBase32, currentStep) {
   const cleanCode = inputCode.trim()
@@ -140,18 +140,18 @@ async function verifyTOTPCodeDetailed(inputCode, secretBase32, currentStep) {
     return {
       valid: false,
       type: 'INVALID_FORMAT',
-      reason: '6자리 숫자를 입력하세요.',
+      reason: 'Please enter a valid 6-digit numeric code.',
       delta: null,
       absDelta: 0,
       isDiscontinuous: false
     }
   }
 
-  // 1. 유효 범위 검사 (오차 0초, -30초, +30초)
+  // 1. Valid tolerance range (0s, -30s, +30s)
   const validSteps = [
-    { step: currentStep, delta: 0, label: '현재 구간 (오차 0초)' },
-    { step: currentStep - 1, delta: -1, label: '직전 구간 (시계 지연 -30초 허용)' },
-    { step: currentStep + 1, delta: +1, label: '다음 구간 (시계 빠름 +30초 허용)' }
+    { step: currentStep, delta: 0, label: 'Current Window (0s offset)' },
+    { step: currentStep - 1, delta: -1, label: 'Previous Window (-30s clock-delay allowed)' },
+    { step: currentStep + 1, delta: +1, label: 'Next Window (+30s clock-advance allowed)' }
   ]
 
   for (const item of validSteps) {
@@ -169,9 +169,9 @@ async function verifyTOTPCodeDetailed(inputCode, secretBase32, currentStep) {
     }
   }
 
-  // 2. 실패 시 정밀 진단: 과거(-2 ~ -10) 또는 미래(+2 ~ +10) 타임스텝 검사
+  // 2. Extended window evaluation (-10 to +10 steps) to classify failure
   for (let delta = -10; delta <= 10; delta++) {
-    if (delta >= -1 && delta <= 1) continue // 유효 범위는 건너뜀
+    if (delta >= -1 && delta <= 1) continue // Skip already checked valid window
     const checkStep = currentStep + delta
     const computed = await computeTOTP(secretBase32, checkStep)
 
@@ -184,8 +184,8 @@ async function verifyTOTPCodeDetailed(inputCode, secretBase32, currentStep) {
           delta,
           absDelta,
           isDiscontinuous: absDelta >= 2,
-          reason: `인증 시간 초과: ${absDelta * 30}초 전에 만료된 이전 코드입니다. (${absDelta}스텝 과거)`,
-          label: `만료된 과거 코드 (${absDelta * 30}초 경과)`
+          reason: `Code Expired: This token expired ${absDelta * 30} seconds ago (${absDelta} steps in the past).`,
+          label: `Expired Token (${absDelta * 30}s elapsed)`
         }
       } else {
         return {
@@ -194,53 +194,53 @@ async function verifyTOTPCodeDetailed(inputCode, secretBase32, currentStep) {
           delta,
           absDelta,
           isDiscontinuous: absDelta >= 2,
-          reason: `기기 시계 불일치: ${delta * 30}초 후의 미래 코드입니다. 스마트폰의 시간을 확인하세요. (${delta}스텝 빠름)`,
-          label: `미래 코드 (${delta * 30}초 선행)`
+          reason: `Device Clock Skew: This is a future token for ${delta * 30} seconds ahead. Check your phone's time synchronization.`,
+          label: `Future Token (+${delta * 30}s ahead)`
         }
       }
     }
   }
 
-  // 3. 어디에도 일치하지 않는 경우 -> 완전 코드 불일치 (오타 또는 잘못된 키)
+  // 3. Not found anywhere in extended window -> Complete Code Mismatch
   return {
     valid: false,
     type: 'MISMATCH',
     delta: null,
     absDelta: 0,
     isDiscontinuous: false,
-    reason: '인증 번호 불일치: 입력한 6자리 번호가 전혀 일치하지 않습니다. (오타 또는 계정 확인 필요)',
-    label: '코드 불일치'
+    reason: 'Code Mismatch: The entered 6-digit code does not match. Please verify your phone authenticator or check for typos.',
+    label: 'Code Mismatch'
   }
 }
 
 export default function App() {
-  // 활성 뷰: 'dual' (스마트폰 연동 + 실전 로그인), 'security' (보안 아키텍처/무전송 검증)
+  // Active View: 'dual' (Smartphone Setup + Login), 'security' (Security Checkpoints & Audit)
   const [activeView, setActiveView] = useState('dual')
 
-  // 발급자 및 계정 설정
+  // Issuer and Account configuration
   const [issuer, setIssuer] = useState('ZeroAuth')
   const [account, setAccount] = useState('user@k-cybersec.ac.kr')
   const [secretKey, setSecretKey] = useState(() => generateBase32Secret(20))
 
-  // 1. '스캔이 안 되나요?' 수동 키 토글 상태 (기본 숨김)
+  // 1. Manual Key toggle ('Cannot scan QR code?')
   const [showManualKey, setShowManualKey] = useState(false)
 
-  // 2. 감사 로그 대시보드 토글 상태 (기본 숨김)
+  // 2. Audit Log dashboard toggle
   const [showAuditLogs, setShowAuditLogs] = useState(false)
 
-  // 3. 30초 쿨다운 & 재발급 타이머 상태
+  // 3. 30-second epoch protection & re-issuance cooldown
   const [keyGeneratedAt, setKeyGeneratedAt] = useState(() => Date.now())
   const [keyCooldown, setKeyCooldown] = useState(30)
 
-  // 연속 실패 횟수 추적 (불연속성 및 브루트포스 감지용)
+  // Track consecutive failure count (for anomaly / brute-force detection)
   const [consecutiveFailures, setConsecutiveFailures] = useState(0)
 
-  // 현재 타임스텝 (내부 검증용 백그라운드 동기화)
+  // Current epoch step (internal verification epoch, never exposed on screen)
   const [currentStep, setCurrentStep] = useState(() => Math.floor(Date.now() / 1000 / 30))
   const [copiedKey, setCopiedKey] = useState(false)
   const [copiedUri, setCopiedUri] = useState(false)
 
-  // 로그인 시뮬레이터 상태
+  // Login Simulator state
   const [loginStage, setLoginStage] = useState('credentials')
   const [username, setUsername] = useState('cybersec_admin')
   const [password, setPassword] = useState('password123!')
@@ -252,22 +252,22 @@ export default function App() {
     {
       id: 1,
       timestamp: new Date().toLocaleTimeString(),
-      event: '시스템 초기화: Zero-Transmission Web Crypto 엔진 로드',
+      event: '[SYSTEM INITIALIZED]: Zero-Transmission Web Crypto engine active',
       status: 'info'
     }
   ])
 
-  // OTP 6자리 인풋 refs
+  // OTP 6-digit input refs
   const otpInputRefs = useRef([])
 
-  // RFC 6238 표준 URI (스마트폰 앱 연동용)
+  // RFC 6238 Standard URI for Authenticator Apps
   const otpauthUri = `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(account)}?secret=${secretKey}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`
 
-  // 30초 경과 시에만 새 비밀 키 재발급 허용
+  // Re-generate secret key only when 30 seconds have elapsed
   const handleRegenerateKey = useCallback(() => {
     const elapsed = Math.floor((Date.now() - keyGeneratedAt) / 1000)
     if (elapsed < 30) {
-      alert(`키 발급 후 30초가 지나야 재발급할 수 있습니다. (${30 - elapsed}초 남음)`)
+      alert(`A new key can only be generated after 30 seconds have passed. (${30 - elapsed}s remaining)`)
       return
     }
 
@@ -281,14 +281,14 @@ export default function App() {
       {
         id: Date.now(),
         timestamp: new Date().toLocaleTimeString(),
-        event: '30초 경과 확인: 새 Base32 비밀 키 재발급 (160비트 암호학적 엔트로피 풀 생성)',
+        event: '[KEY RE-ISSUED]: 30s epoch verified - Generated fresh 160-bit Base32 secret key',
         status: 'warning'
       },
       ...prev
     ])
   }, [keyGeneratedAt])
 
-  // 1초 주기로 타임스텝 및 30초 키 쿨다운 타이머 갱신
+  // 1-second interval loop for step tracking and 30s key cooldown timer
   useEffect(() => {
     const interval = setInterval(() => {
       const nowMs = Date.now()
@@ -304,18 +304,18 @@ export default function App() {
     return () => clearInterval(interval)
   }, [keyGeneratedAt])
 
-  // 클립보드 복사 헬퍼
+  // Clipboard copy helper
   const handleCopy = (text, setCopiedFn) => {
     navigator.clipboard.writeText(text)
     setCopiedFn(true)
     setTimeout(() => setCopiedFn(false), 2000)
   }
 
-  // 1단계 ID/PW 제출 -> 2단계 모달로 진입
+  // Submit Step 1 Credentials -> Proceed to Step 2 2FA Modal
   const handleCredentialsSubmit = (e) => {
     e.preventDefault()
     if (!username.trim() || !password.trim()) {
-      alert('아이디와 비밀번호를 입력해주세요.')
+      alert('Please enter your username and password.')
       return
     }
     setOtpInputs(['', '', '', '', '', ''])
@@ -327,7 +327,7 @@ export default function App() {
     }, 100)
   }
 
-  // 6자리 OTP 입력 처리
+  // Handle 6-digit OTP typing and auto-focus
   const handleOtpChange = (index, value) => {
     const cleanVal = value.replace(/\D/g, '')
     if (!cleanVal) {
@@ -374,7 +374,7 @@ export default function App() {
     otpInputRefs.current[nextIdx]?.focus()
   }
 
-  // OTP 인증 재시도 핸들러
+  // Retry verification handler
   const handleRetryVerification = () => {
     setOtpInputs(['', '', '', '', '', ''])
     setVerificationResult(null)
@@ -383,14 +383,14 @@ export default function App() {
     }, 100)
   }
 
-  // 2FA 정밀 검증 및 특수 로그 처리 수행
+  // Execute 2FA Verification & Diagnostic Logging
   const executeVerification = async () => {
     const fullCode = otpInputs.join('')
     if (fullCode.length !== 6) {
       setVerificationResult({
         valid: false,
         type: 'INVALID_FORMAT',
-        reason: '6자리 인증 코드를 모두 입력해 주세요.'
+        reason: 'Please enter all 6 digits of your authentication code.'
       })
       return
     }
@@ -406,7 +406,6 @@ export default function App() {
       const timeStr = new Date().toLocaleTimeString()
 
       if (result.valid) {
-        // 성공 시 실패 카운트 리셋
         setConsecutiveFailures(0)
 
         const newSession = {
@@ -422,7 +421,7 @@ export default function App() {
           {
             id: Date.now(),
             timestamp: timeStr,
-            event: `[인증 성공] 2단계 OTP 검증 통과 (${result.label}) - 사용자 [${username}] 보안 인가`,
+            event: `[SUCCESS] 2FA OTP Verified (${result.label}) - User [${username}] authorized`,
             status: 'success'
           },
           ...prev
@@ -432,52 +431,51 @@ export default function App() {
           setLoginStage('dashboard')
         }, 700)
       } else {
-        // 실패 카운트 증가
         const newFailCount = consecutiveFailures + 1
         setConsecutiveFailures(newFailCount)
 
         const newLogs = []
 
-        // 1. 기본 실패 로그 (불일치 vs 시간 초과 구분)
+        // 1. Basic failure log (Mismatch vs Expiration)
         if (result.type === 'EXPIRED') {
           newLogs.push({
             id: Date.now(),
             timestamp: timeStr,
-            event: `[인증 실패: 시간 초과] 입력 코드 [${fullCode}] 유효 시간 만료 (${result.absDelta * 30}초 전 만료된 이전 코드)`,
+            event: `[FAILED: TIME EXPIRED] Code [${fullCode}] expired (${result.absDelta * 30}s past expiration)`,
             status: 'warning'
           })
         } else if (result.type === 'CLOCK_AHEAD') {
           newLogs.push({
             id: Date.now(),
             timestamp: timeStr,
-            event: `[인증 실패: 시계 불일치] 입력 코드 [${fullCode}] 미래 시간대 코드 (${result.delta * 30}초 선행 - 단말기 시계 오차)`,
+            event: `[FAILED: CLOCK SKEW] Code [${fullCode}] future time-step (+${result.delta * 30}s ahead - phone clock skew)`,
             status: 'warning'
           })
         } else {
           newLogs.push({
             id: Date.now(),
             timestamp: timeStr,
-            event: `[인증 실패: 코드 불일치] 유효하지 않은 코드 [${fullCode}] 입력 (키 불일치 또는 오타)`,
+            event: `[FAILED: CODE MISMATCH] Invalid code [${fullCode}] entered (typo or key mismatch)`,
             status: 'danger'
           })
         }
 
-        // 2. 특수 로그 1: 2스텝 또는 그 이상의 시간 불연속 발생 시
+        // 2. Special Log 1: Time discontinuity >= 2 steps (|delta| >= 2)
         if (result.isDiscontinuous) {
           newLogs.unshift({
             id: Date.now() + 1,
             timestamp: timeStr,
-            event: `🚨 [특수 감사 로그: ${result.absDelta}스텝 시간 불연속(Discontinuity) 감지] 현재 에포크 T=${currentStep} 대비 편차 Δ=${result.delta > 0 ? '+' : ''}${result.delta} (${result.absDelta * 30}초 격차) - ${result.type === 'EXPIRED' ? '만료된 과거 토큰 지연 입력' : '비정상 미래 시간대 접근'}`,
+            event: `[SPECIAL]: Detected ${result.absDelta}-step time discontinuity (delta = ${result.delta > 0 ? '+' : ''}${result.delta}, ${result.absDelta * 30}s gap) - ${result.type === 'EXPIRED' ? 'Expired historical token replay' : 'Future time-step access anomaly'}`,
             status: 'special'
           })
         }
 
-        // 3. 특수 로그 2: 2회 이상 연속 실패(불연속적 인증 오류) 감지 시
+        // 3. Special Log 2: Consecutive failure count >= 2
         if (newFailCount >= 2) {
           newLogs.unshift({
             id: Date.now() + 2,
             timestamp: timeStr,
-            event: `🚨 [특수 감사 로그: 연속 ${newFailCount}회 인증 실패 감지] 단기간 연속 실패 발생 - 무차별 대입(Brute-Force) 공격 의심 또는 세션 이상 감지`,
+            event: `[SPECIAL]: Detected ${newFailCount} Consecutive Failures - Warning: Potential brute-force attack or anomalous session`,
             status: 'special'
           })
         }
@@ -487,7 +485,7 @@ export default function App() {
     }, 200)
   }
 
-  // 로그아웃
+  // Sign out
   const handleLogout = () => {
     setLoginStage('credentials')
     setSessionData(null)
@@ -498,7 +496,7 @@ export default function App() {
       {
         id: Date.now(),
         timestamp: new Date().toLocaleTimeString(),
-        event: `사용자 [${username}] 로그아웃 완료`,
+        event: `[LOGOUT]: User [${username}] signed out successfully`,
         status: 'info'
       },
       ...prev
@@ -519,16 +517,16 @@ export default function App() {
               <span className="badge badge-cyber">RFC 6238 TOTP</span>
             </div>
             <p className="brand-subtitle">
-              Zero-Transmission 클라이언트 사이드 암호화 2단계 인증 시스템
+              Zero-Transmission Client-Side Web Crypto 2-Factor Authentication
             </p>
           </div>
         </div>
 
-        {/* 상단 보안 상태 표시기 */}
+        {/* Security Status Indicators */}
         <div className="header-status-box">
           <div className="status-item">
             <span className="status-dot active"></span>
-            <span className="status-text">Zero-Transmission: Web Crypto 로컬 연산 (네트워크 전송 0건)</span>
+            <span className="status-text">Zero-Transmission: Local Web Crypto execution (0 network transmissions)</span>
           </div>
           <div className="status-item">
             <span className="status-dot secure"></span>
@@ -544,7 +542,7 @@ export default function App() {
           onClick={() => setActiveView('dual')}
         >
           <Sparkles size={18} />
-          <span>2FA 스튜디오 (스마트폰 연동 & 실전 로그인)</span>
+          <span>2FA Studio (Smartphone Setup & Live Login)</span>
         </button>
 
         <button
@@ -552,7 +550,7 @@ export default function App() {
           onClick={() => setActiveView('security')}
         >
           <ShieldCheck size={18} />
-          <span>사이버보안 체크포인트 & F12 무전송 검증</span>
+          <span>Cybersecurity Checkpoints & F12 Zero-Transmission Audit</span>
         </button>
       </nav>
 
@@ -560,41 +558,41 @@ export default function App() {
       <main className="main-content">
         {activeView === 'dual' && (
           <div className="dual-studio-container">
-            {/* ================= 좌측: 스마트폰 QR 코드 연동 & 키 등록 센터 ================= */}
+            {/* ================= LEFT: Smartphone QR Code Setup & Key Registration ================= */}
             <section className="studio-col qr-sync-panel">
               <div className="card h-full">
                 <div className="card-header">
-                  <div className="card-badge">스마트폰 2FA 등록 센터 (Criterion 1 & 2)</div>
+                  <div className="card-badge">Smartphone 2FA Registration (Criteria 1 & 2)</div>
                   <div className="card-header-row">
                     <h2 className="card-title">
-                      <QrCode size={22} className="text-cyan" /> 스마트폰 QR 코드 연동
+                      <QrCode size={22} className="text-cyan" /> Smartphone QR Code Integration
                     </h2>
 
-                    {/* 3. 30초 경과 시에만 재발급 버튼 활성화 */}
+                    {/* 30-Second Cooldown Key Re-issuance Button */}
                     {keyCooldown === 0 ? (
                       <button
                         className="btn btn-primary btn-sm pulse-btn"
                         onClick={handleRegenerateKey}
-                        title="30초 경과 확인됨 - 클릭 시 새 비밀 키를 재발급합니다."
+                        title="30s epoch verified - Click to generate a fresh secret key."
                       >
-                        <RefreshCw size={14} /> 새 보안 키 재발급
+                        <RefreshCw size={14} /> Regenerate Security Key
                       </button>
                     ) : (
                       <button
                         className="btn btn-secondary btn-sm disabled-timer-btn"
                         disabled
-                        title={`30초 주기 보호: ${keyCooldown}초 후에 재발급할 수 있습니다.`}
+                        title={`30s epoch rate-limit: Please wait ${keyCooldown}s before regenerating.`}
                       >
-                        <Clock size={14} /> 재발급 대기 ({keyCooldown}s)
+                        <Clock size={14} /> Cooldown ({keyCooldown}s)
                       </button>
                     )}
                   </div>
                   <p className="card-desc">
-                    스마트폰의 Google Authenticator 또는 2FAS 앱으로 아래 QR 코드를 스캔하여 계정을 등록하세요.
+                    Scan the QR code below with Google Authenticator, 2FAS, or Microsoft Authenticator on your smartphone.
                   </p>
                 </div>
 
-                {/* 선명한 QR 코드 표시 영역 */}
+                {/* Scannable QR Code Display Area */}
                 <div className="qr-highlight-area">
                   <div className="qr-box-main">
                     <QRCodeSVG
@@ -608,11 +606,11 @@ export default function App() {
                   </div>
                   <div className="qr-badge-notice">
                     <Smartphone size={15} />
-                    <span>스마트폰 카메라로 즉시 스캔 가능 (otpauth://)</span>
+                    <span>Scan directly with your phone camera (otpauth://)</span>
                   </div>
                 </div>
 
-                {/* 1. '스캔이 안 되나요?' 토글 버튼 */}
+                {/* 1. 'Cannot scan QR code?' Toggle Button (Shields Secret Key from Shoulder-Surfing) */}
                 <div className="scan-trouble-box">
                   <button
                     type="button"
@@ -621,24 +619,24 @@ export default function App() {
                   >
                     <div className="btn-trouble-left">
                       <HelpCircle size={16} className="text-cyan" />
-                      <span>스캔이 안 되나요? (수동 입력 설정 키 확인)</span>
+                      <span>Cannot scan QR code? (View Manual Setup Key)</span>
                     </div>
                     {showManualKey ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                   </button>
 
-                  {/* 토글 활성화 시에만 펼쳐지는 수동 입력 Secret Key 영역 */}
+                  {/* Collapsible Manual Setup Key Drawer */}
                   {showManualKey && (
                     <div className="manual-key-drawer">
                       <div className="drawer-header">
                         <span className="drawer-title">
-                          <Key size={14} /> Base32 Secret Key (수동 설정 키)
+                          <Key size={14} /> Base32 Secret Key (Manual Entry Key)
                         </span>
                         <button
                           className="btn-icon-copy"
                           onClick={() => handleCopy(secretKey, setCopiedKey)}
                         >
                           {copiedKey ? <Check size={14} className="text-success" /> : <Copy size={14} />}
-                          <span>{copiedKey ? '복사됨' : '키 복사'}</span>
+                          <span>{copiedKey ? 'Copied!' : 'Copy Key'}</span>
                         </button>
                       </div>
 
@@ -646,14 +644,13 @@ export default function App() {
                         {secretKey.match(/.{1,4}/g)?.join(' ') || secretKey}
                       </div>
                       <p className="manual-guide-text">
-                        스마트폰 Authenticator 앱에서 <strong>[설정 키 직접 입력]</strong>을 선택한 후 위 키를
-                        입력하세요.
+                        In your authenticator app, choose <strong>'Enter a setup key'</strong> and enter the key above.
                       </p>
 
-                      {/* 발급자 및 계정 커스터마이징 */}
+                      {/* Issuer & Account Customization */}
                       <div className="issuer-account-inputs">
                         <div className="input-inline">
-                          <label>발급자:</label>
+                          <label>Issuer:</label>
                           <input
                             type="text"
                             value={issuer}
@@ -662,7 +659,7 @@ export default function App() {
                           />
                         </div>
                         <div className="input-inline">
-                          <label>계정:</label>
+                          <label>Account:</label>
                           <input
                             type="text"
                             value={account}
@@ -672,16 +669,16 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* 표준 URI 복사 */}
+                      {/* Standard URI Box */}
                       <div className="uri-mini-box">
                         <div className="uri-mini-header">
-                          <span>표준 URI (otpauth://)</span>
+                          <span>Standard URI (otpauth://)</span>
                           <button
                             className="btn-text-sm"
                             onClick={() => handleCopy(otpauthUri, setCopiedUri)}
                           >
                             {copiedUri ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-                            <span>{copiedUri ? '복사됨' : 'URI 복사'}</span>
+                            <span>{copiedUri ? 'Copied' : 'Copy URI'}</span>
                           </button>
                         </div>
                         <code className="uri-mini-code">{otpauthUri}</code>
@@ -690,62 +687,62 @@ export default function App() {
                   )}
                 </div>
 
-                {/* 스마트폰 연동 3단계 가이드 */}
+                {/* Smartphone 3-Step Enrollment Guide */}
                 <div className="enroll-steps-card">
                   <div className="enroll-steps-title">
                     <Smartphone size={15} className="text-cyan" />
-                    <span>스마트폰 Authenticator 앱 연동 방법</span>
+                    <span>How to link with your Smartphone Authenticator App</span>
                   </div>
                   <div className="enroll-step-list">
                     <div className="enroll-step-item">
                       <span className="step-circle">1</span>
-                      <p>스마트폰에서 <strong>Google Authenticator</strong> 또는 <strong>2FAS</strong> 실행</p>
+                      <p>Open <strong>Google Authenticator</strong>, <strong>2FAS</strong>, or Microsoft Authenticator on your phone</p>
                     </div>
                     <div className="enroll-step-item">
                       <span className="step-circle">2</span>
-                      <p><strong>+ (추가)</strong> 버튼 $\rightarrow$ <strong>QR 코드 스캔</strong>으로 위 QR 스캔</p>
+                      <p>Tap <strong>'+' (Add)</strong> $\rightarrow$ <strong>Scan QR Code</strong> to scan the code above</p>
                     </div>
                     <div className="enroll-step-item">
                       <span className="step-circle">3</span>
-                      <p>스마트폰 화면에 뜨는 <strong>6자리 번호</strong>를 확인하여 우측 로그인에 입력</p>
+                      <p>Check the <strong>6-digit code</strong> generated on your phone screen and enter it in the login panel</p>
                     </div>
                   </div>
                 </div>
 
-                {/* 2FA 보안 원칙 안내 */}
+                {/* 2FA Security Principle Notice */}
                 <div className="security-notice-card">
                   <div className="security-notice-header">
                     <ShieldCheck size={16} className="text-success" />
-                    <strong>2단계 인증(소유 기반) 보안 원칙</strong>
+                    <strong>2-Factor Authentication (Possession Factor) Principle</strong>
                   </div>
                   <p className="security-notice-desc">
-                    일회용 인증 번호(OTP)는 사용자가 직접 소유한 스마트폰 기기 내부에서만 독립적으로
-                    생성되며, 웹 브라우저 화면에는 노출되지 않습니다. 이를 통해 화면 캡처나 비밀번호
-                    유출 시에도 계정을 안전하게 보호합니다.
+                    The One-Time Password (OTP) is computed exclusively inside your physical smartphone
+                    and is never exposed on the web browser screen. This ensures complete protection even if
+                    your PC screen is captured or your password is compromised.
                   </p>
                 </div>
               </div>
             </section>
 
-            {/* ================= 우측: 실전 로그인 시뮬레이터 & 검증 ================= */}
+            {/* ================= RIGHT: Production Login Simulator & Verification ================= */}
             <section className="studio-col simulator-panel">
-              {/* 단계 1: 1차 ID/PW 로그인 폼 */}
+              {/* Step 1: Username & Password Form */}
               {loginStage === 'credentials' && (
                 <div className="card h-full">
                   <div className="card-header">
-                    <div className="card-badge">실전 서비스 로그인 시뮬레이터 (Step 1 / 2)</div>
+                    <div className="card-badge">Enterprise Login Simulator (Step 1 / 2)</div>
                     <h2 className="card-title">
-                      <LogIn size={22} className="text-primary" /> 서비스 포털 로그인
+                      <LogIn size={22} className="text-primary" /> Service Portal Login
                     </h2>
                     <p className="card-desc">
-                      아이디와 비밀번호로 1차 로그인한 후, 스마트폰 앱의 2단계 OTP 인증을 진행합니다.
+                      Log in with your credentials, then proceed to the 2-Factor OTP verification step.
                     </p>
                   </div>
 
                   <form onSubmit={handleCredentialsSubmit} className="login-form-inner">
                     <div className="input-group">
                       <label className="input-label" htmlFor="input-username">
-                        <User size={16} /> 아이디 (Username)
+                        <User size={16} /> Username
                       </label>
                       <input
                         id="input-username"
@@ -753,14 +750,14 @@ export default function App() {
                         className="text-input"
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
-                        placeholder="아이디를 입력하세요"
+                        placeholder="Enter your username"
                         required
                       />
                     </div>
 
                     <div className="input-group">
                       <label className="input-label" htmlFor="input-password">
-                        <Lock size={16} /> 비밀번호 (Password)
+                        <Lock size={16} /> Password
                       </label>
                       <input
                         id="input-password"
@@ -768,7 +765,7 @@ export default function App() {
                         className="text-input"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        placeholder="비밀번호를 입력하세요"
+                        placeholder="Enter your password"
                         required
                       />
                     </div>
@@ -776,17 +773,17 @@ export default function App() {
                     <div className="info-guide-card">
                       <Info size={16} className="text-cyan" />
                       <div>
-                        <strong>실전 로그인 가이드:</strong>
+                        <strong>Quick Start Guide:</strong>
                         <p>
-                          스마트폰에서 왼쪽 QR 코드를 스캔해 계정을 추가한 뒤, 아래 버튼을 눌러 2단계
-                          인증 코드를 입력하세요.
+                          After scanning the QR code on the left with your phone, click the button below
+                          to proceed to the 2FA verification step.
                         </p>
                       </div>
                     </div>
 
                     <div className="form-submit-row">
                       <button type="submit" className="btn btn-primary btn-block">
-                        <span>로그인 $\rightarrow$ 2단계 OTP 인증 진행</span>
+                        <span>Sign In $\rightarrow$ Proceed to 2FA Verification</span>
                         <ArrowRight size={18} />
                       </button>
                     </div>
@@ -794,22 +791,21 @@ export default function App() {
                 </div>
               )}
 
-              {/* 단계 2: 2단계 OTP 6자리 검증 모달 */}
+              {/* Step 2: 2FA 6-Digit OTP Verification Modal */}
               {loginStage === '2fa' && (
                 <div className="card h-full modal-glow-card">
                   <div className="card-header">
-                    <div className="card-badge text-cyan">2단계 본인 인증 (Step 2 / 2)</div>
+                    <div className="card-badge text-cyan">Two-Factor Identity Verification (Step 2 / 2)</div>
                     <h2 className="card-title">
-                      <ShieldCheck size={22} className="text-success" /> 스마트폰 OTP 6자리 입력
+                      <ShieldCheck size={22} className="text-success" /> Enter Smartphone 6-Digit OTP
                     </h2>
                     <p className="card-desc">
-                      스마트폰 <strong>Google Authenticator</strong> 또는 <strong>2FAS</strong> 앱에
-                      표시된 6자리 번호를 입력하세요.
+                      Enter the 6-digit code currently displayed in <strong>Google Authenticator</strong> or <strong>2FAS</strong> on your phone.
                     </p>
                   </div>
 
                   <div className="otp-verification-body">
-                    {/* 6자리 분할 인풋 */}
+                    {/* 6-Digit Split Inputs */}
                     <div className="otp-digit-container">
                       {otpInputs.map((digit, idx) => (
                         <input
@@ -831,11 +827,11 @@ export default function App() {
 
                     <div className="otp-helper-row">
                       <span className="clock-drift-pill">
-                        <Clock size={13} className="text-cyan" /> $\pm 1$스텝($\pm 30$초) 시계 오차 자동 허용
+                        <Clock size={13} className="text-cyan" /> $\pm 1$ Step ($\pm 30$s) Clock-Drift Tolerance Automatically Applied
                       </span>
                     </div>
 
-                    {/* 검증 결과 알림 배너 (불일치 vs 시간 초과 구분 & 특수 경고) */}
+                    {/* Verification Result Banner */}
                     {verificationResult && (
                       <div
                         className={`alert-banner ${
@@ -846,8 +842,8 @@ export default function App() {
                           <>
                             <ShieldCheck size={22} />
                             <div>
-                              <strong>인증 성공!</strong>
-                              <p>{verificationResult.label}에서 일치 확인되었습니다.</p>
+                              <strong>Verification Successful!</strong>
+                              <p>Matched at {verificationResult.label}.</p>
                             </div>
                           </>
                         ) : (
@@ -856,15 +852,15 @@ export default function App() {
                             <div className="alert-content-fail">
                               <div className="fail-badge-row">
                                 <span className={`fail-category-badge category-${verificationResult.type.toLowerCase()}`}>
-                                  {verificationResult.type === 'EXPIRED' && '⏱️ 인증 시간 초과 (Expired)'}
-                                  {verificationResult.type === 'CLOCK_AHEAD' && '⏰ 기기 시계 불일치 (Ahead)'}
-                                  {verificationResult.type === 'MISMATCH' && '❌ 인증 번호 불일치 (Mismatch)'}
-                                  {verificationResult.type === 'INVALID_FORMAT' && '⚠️ 형식 오류'}
+                                  {verificationResult.type === 'EXPIRED' && '⏱️ [EXPIRED]: Code Expired'}
+                                  {verificationResult.type === 'CLOCK_AHEAD' && '⏰ [CLOCK SKEW]: Future Code'}
+                                  {verificationResult.type === 'MISMATCH' && '❌ [MISMATCH]: Invalid Code'}
+                                  {verificationResult.type === 'INVALID_FORMAT' && '⚠️ Format Error'}
                                 </span>
 
                                 {verificationResult.isDiscontinuous && (
                                   <span className="special-alert-chip">
-                                    <AlertTriangle size={12} /> {verificationResult.absDelta}스텝 불연속 특수 로그 기록됨
+                                    <AlertTriangle size={12} /> [SPECIAL]: {verificationResult.absDelta}-step discontinuity logged
                                   </span>
                                 )}
                               </div>
@@ -873,17 +869,17 @@ export default function App() {
 
                               {consecutiveFailures >= 2 && (
                                 <p className="consecutive-fail-warn">
-                                  🚨 연속 {consecutiveFailures}회 실패 감지: 보안 감사 로그에 특수 경보가 생성되었습니다.
+                                  🚨 [SPECIAL]: Detected {consecutiveFailures} Consecutive Failures - Security warning logged in audit trail.
                                 </p>
                               )}
 
-                              {/* 실패 시 재시도 안내 */}
+                              {/* Re-enter Code Button */}
                               <button
                                 type="button"
                                 className="btn-retry-inline"
                                 onClick={handleRetryVerification}
                               >
-                                <RotateCcw size={13} /> 코드 다시 입력하기
+                                <RotateCcw size={13} /> Re-enter Code
                               </button>
                             </div>
                           </>
@@ -891,14 +887,14 @@ export default function App() {
                       </div>
                     )}
 
-                    {/* 검증 액션 버튼 */}
+                    {/* Verification Action Buttons */}
                     <div className="verify-actions-row">
                       <button
                         type="button"
                         className="btn btn-secondary"
                         onClick={() => setLoginStage('credentials')}
                       >
-                        이전 단계
+                        Previous Step
                       </button>
                       <button
                         type="button"
@@ -909,12 +905,12 @@ export default function App() {
                         {isVerifying ? (
                           <>
                             <RefreshCw size={18} className="spin" />
-                            <span>검증 중...</span>
+                            <span>Verifying...</span>
                           </>
                         ) : (
                           <>
                             <CheckCircle2 size={18} />
-                            <span>인증 확인</span>
+                            <span>Verify Code</span>
                           </>
                         )}
                       </button>
@@ -923,7 +919,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* 단계 3: 인증 완료 대시보드 */}
+              {/* Step 3: Authenticated Admin Dashboard */}
               {loginStage === 'dashboard' && sessionData && (
                 <div className="card h-full dashboard-auth-card">
                   <div className="dashboard-header">
@@ -931,49 +927,49 @@ export default function App() {
                       <ShieldCheck size={36} />
                     </div>
                     <div className="dashboard-header-text">
-                      <h2 className="dashboard-title">보안 관리자 대시보드 인가 완료</h2>
+                      <h2 className="dashboard-title">Security Administrator Dashboard Authorized</h2>
                       <p className="dashboard-subtitle">
-                        Zero-Transmission TOTP 2단계 인증이 성공적으로 완료되었습니다.
+                        Zero-Transmission TOTP 2-Factor Authentication successfully verified.
                       </p>
                     </div>
                     <button className="btn btn-secondary btn-sm" onClick={handleLogout}>
-                      <LogOut size={16} /> 로그아웃
+                      <LogOut size={16} /> Sign Out
                     </button>
                   </div>
 
-                  {/* 세션 메타데이터 카드 */}
+                  {/* Session Metadata Cards */}
                   <div className="session-grid">
                     <div className="session-card">
-                      <span className="session-label">인증 계정</span>
+                      <span className="session-label">Authenticated User</span>
                       <strong className="session-val">{sessionData.user}</strong>
                     </div>
                     <div className="session-card">
-                      <span className="session-label">인증 시각</span>
+                      <span className="session-label">Auth Timestamp</span>
                       <strong className="session-val">{sessionData.authenticatedAt}</strong>
                     </div>
                     <div className="session-card">
-                      <span className="session-label">시간 동기화 구간</span>
+                      <span className="session-label">Sync Window</span>
                       <strong className="session-val text-success">{sessionData.matchedWindow}</strong>
                     </div>
                     <div className="session-card">
-                      <span className="session-label">네트워크 무전송 검증</span>
-                      <strong className="session-val text-cyan">0 Byte 외부 유출 (Web Crypto)</strong>
+                      <span className="session-label">Zero-Transmission</span>
+                      <strong className="session-val text-cyan">0 Bytes Outbound Payload (Web Crypto)</strong>
                     </div>
                   </div>
 
-                  {/* 2. 실시간 보안 감사 로그 토글 UI */}
+                  {/* 2. Collapsible Security Event Audit Trail */}
                   <div className="audit-section">
                     <div className="audit-header-row">
                       <div className="section-title">
                         <Terminal size={17} className="text-cyan" />
-                        <span>보안 감사 이벤트 로그 (Audit Trail)</span>
+                        <span>Security Event Audit Trail</span>
                       </div>
                       <button
                         type="button"
                         className="btn-audit-toggle"
                         onClick={() => setShowAuditLogs(!showAuditLogs)}
                       >
-                        <span>{showAuditLogs ? '로그 숨기기' : `로그 보기 (${auditLogs.length}건)`}</span>
+                        <span>{showAuditLogs ? 'Hide Logs' : `View Logs (${auditLogs.length})`}</span>
                         {showAuditLogs ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                       </button>
                     </div>
@@ -995,76 +991,74 @@ export default function App() {
           </div>
         )}
 
-        {/* ================= TAB: 보안 체크포인트 & F12 무전송 검증 ================= */}
+        {/* ================= TAB: Cybersecurity Checkpoints & F12 Zero-Transmission Audit ================= */}
         {activeView === 'security' && (
           <div className="tab-pane security-container">
             <div className="security-hero-card">
               <ShieldCheck size={48} className="text-success" />
               <div>
-                <h2>사이버보안 체크포인트 & Zero-Transmission 검증 가이드</h2>
+                <h2>Cybersecurity Checkpoints & Zero-Transmission Audit Guide</h2>
                 <p>
-                  본 어플리케이션은 비밀 키 생성부터 HMAC-SHA1 연산 및 동기화 검증까지 전 과정을 브라우저
-                  로컬(Web Crypto API)에서 수행합니다.
+                  This application performs all cryptographic secret key generation, HMAC-SHA1 signature computation,
+                  and clock-drift synchronization verification locally inside the browser via the Web Crypto API.
                 </p>
               </div>
             </div>
 
             <div className="security-grid">
-              {/* 체크포인트 1 */}
+              {/* Checkpoint 1 */}
               <div className="card">
                 <div className="card-header">
-                  <div className="checkpoint-badge">체크포인트 1</div>
-                  <h3 className="card-title">Math.random() 절대 금지 원칙</h3>
+                  <div className="checkpoint-badge">Checkpoint 1</div>
+                  <h3 className="card-title">Absolute Prohibition of Math.random()</h3>
                 </div>
                 <div className="security-detail">
                   <p>
-                    일반적인 <code>Math.random()</code>은 의사 난수 생성기(PRNG)로 과거 시드나 상태를
-                    통해 다음 출력값을 예측할 수 있어 암호학적 키 생성에 절대 사용할 수 없습니다.
+                    Standard pseudo-random number generators (<code>Math.random()</code>) are completely predictable
+                    based on seed states and are strictly prohibited for cryptographic key generation.
                   </p>
                   <div className="code-comparison">
                     <div className="code-bad">
-                      <span className="code-title">❌ 취약한 방식 (금지)</span>
+                      <span className="code-title">❌ Vulnerable / Forbidden</span>
                       <code>Math.random().toString(36)...</code>
-                      <p className="code-desc">예측 가능한 시드, 엔트로피 부족</p>
+                      <p className="code-desc">Predictable seed, insufficient entropy</p>
                     </div>
                     <div className="code-good">
-                      <span className="code-title">✅ 구현된 방식 (CSPRNG)</span>
+                      <span className="code-title">✅ Implemented CSPRNG</span>
                       <code>window.crypto.getRandomValues(new Uint8Array(20))</code>
-                      <p className="code-desc">OS 하드웨어 엔트로피 기반 160비트 암호학적 난수</p>
+                      <p className="code-desc">Hardware entropy pool sourcing 160 bits of cryptographic randomness</p>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* 체크포인트 2 */}
+              {/* Checkpoint 2 */}
               <div className="card">
                 <div className="card-header">
-                  <div className="checkpoint-badge">체크포인트 2</div>
-                  <h3 className="card-title">Zero-Transmission (무전송 원칙)</h3>
+                  <div className="checkpoint-badge">Checkpoint 2</div>
+                  <h3 className="card-title">Zero-Transmission Principle</h3>
                 </div>
                 <div className="security-detail">
                   <p>
-                    비밀 키와 HMAC-SHA1 서명 연산은 외부 서버나 외부 QR 생성 API(예: Google Charts API)를
-                    일절 거치지 않으며, 브라우저 내장 <code>window.crypto.subtle</code>과 클라이언트 SVG
-                    엔진으로만 처리됩니다.
+                    Secret keys and HMAC-SHA1 signature calculations never leave the client device or touch an external API
+                    server (e.g., no external QR code generators like Google Charts API). All operations are processed natively
+                    via the browser's <code>window.crypto.subtle</code> Web Crypto API and client-side SVG rendering.
                   </p>
 
                   <div className="verification-steps-box">
-                    <h4>🔍 개발자 도구(F12) 직접 검증 가이드</h4>
+                    <h4>🔍 Browser DevTools (F12) Verification Guide</h4>
                     <ol className="verify-list">
                       <li>
-                        키보드의 <code>F12</code> 키를 눌러 <strong>개발자 도구</strong>를 엽니다.
+                        Press <code>F12</code> to open <strong>Developer Tools</strong>.
                       </li>
                       <li>
-                        상단 <strong>Network (네트워크)</strong> 탭을 클릭하고 필터를 <code>Fetch/XHR</code>로
-                        설정합니다.
+                        Switch to the <strong>Network</strong> tab and set the filter to <code>Fetch/XHR</code>.
                       </li>
                       <li>
-                        '새 보안 키 발급' 버튼을 누르거나 로그인 2FA 검증을 수행합니다.
+                        Click 'Regenerate Security Key' or perform a 2FA verification.
                       </li>
                       <li>
-                        <strong>발생하는 외부 HTTP 네트워크 요청이 0건(Zero Outbound Request)</strong>임을
-                        확인합니다.
+                        Confirm that <strong>zero outbound HTTP network requests (0 bytes payload)</strong> are transmitted.
                       </li>
                     </ol>
                   </div>
@@ -1072,37 +1066,36 @@ export default function App() {
               </div>
             </div>
 
-            {/* RFC 6238 수학적 원리 정리 카드 */}
+            {/* RFC 6238 Mathematical Foundations */}
             <div className="card rfc-card">
               <div className="card-header">
                 <h3 className="card-title">
-                  <Terminal size={18} /> RFC 6238 TOTP 수학적 작동 원리
+                  <Terminal size={18} /> RFC 6238 TOTP Mathematical Specification
                 </h3>
               </div>
               <div className="rfc-content-grid">
                 <div className="rfc-step-item">
-                  <div className="rfc-step-title">1. 시간 카운터 (Epoch Step)</div>
+                  <div className="rfc-step-title">1. Time Epoch Counter</div>
                   <p>
                     <code>T = Math.floor(UnixTime / 30)</code>
                     <br />
-                    30초마다 1씩 증가하는 64비트 정수로 변환하여 8바이트 빅엔디안 버퍼에 기록합니다.
+                    A 64-bit integer incrementing every 30 seconds, stored in an 8-byte big-endian buffer.
                   </p>
                 </div>
                 <div className="rfc-step-item">
-                  <div className="rfc-step-title">2. HMAC-SHA1 해시 서명</div>
+                  <div className="rfc-step-title">2. HMAC-SHA1 Hash Signature</div>
                   <p>
                     <code>HS = HMAC-SHA1(Base32SecretBytes, 8-Byte T)</code>
                     <br />
-                    Web Crypto API(crypto.subtle.sign)를 사용해 20바이트 해시 서명을 로컬 계산합니다.
+                    A 20-byte cryptographic hash signature calculated locally via <code>crypto.subtle.sign</code>.
                   </p>
                 </div>
                 <div className="rfc-step-item">
-                  <div className="rfc-step-title">3. 동적 절단 (Dynamic Truncation)</div>
+                  <div className="rfc-step-title">3. Dynamic Truncation (RFC 4226)</div>
                   <p>
                     <code>Offset = HS[19] & 0x0F</code>
                     <br />
-                    마지막 바이트 하위 4비트로 오프셋을 구하고 4바이트 연속 데이터를 추출해 6자리 숫자를
-                    도출합니다.
+                    Extracts 4 consecutive bytes from the offset, masks the sign bit, and performs modulo 10^6 to produce the 6-digit code.
                   </p>
                 </div>
               </div>
@@ -1114,7 +1107,7 @@ export default function App() {
       {/* ================= FOOTER ================= */}
       <footer className="app-footer">
         <p>
-          한국폴리텍대학 강서캠퍼스 사이버보안과 실습 프로젝트 &bull; Zero-Transmission TOTP 2FA Service
+          KOPO Gangseo Cybersecurity Laboratory &bull; Zero-Transmission TOTP 2FA Service
         </p>
         <p className="footer-sub">
           RFC 6238 &bull; RFC 4226 &bull; Web Crypto API &bull; Zero Outbound Network Payload
