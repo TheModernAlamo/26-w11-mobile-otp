@@ -80,3 +80,25 @@ This project adheres strictly to the **Zero-Transmission Principle**, performing
 2. **Collapsible Security Event Audit Trail**: Keeps the administrator dashboard clean by default while allowing security operators to inspect real-time audit logs on demand.
 3. **30-Second Cooldown Rate Limiting**: Enforces standard 30-second epoch protection by disabling key regeneration until 30 seconds have elapsed.
 4. **Diagnostic Logging**: Automatically records `[SPECIAL]: Detected N Consecutive Failures` and `[SPECIAL]: Detected N-step time discontinuity`.
+
+
+---
+
+## 📈 5. 단계별 실행 계획 (Implementation Roadmap)
+
+| 단계 | 목표 | 주요 작업 내용 | 상태 |
+|---|---|---|:---:|
+| **Phase 1** | 코어 암호화 엔진 구축 | - RFC 4648 Base32 인코딩/디코딩 구현<br>- `window.crypto.getRandomValues()` 기반 160비트 난수 생성<br>- `crypto.subtle` 기반 HMAC-SHA1 및 RFC 4226 Dynamic Truncation 검증 | ✅ 완료 |
+| **Phase 2** | UI 3개 파일 분리 & QR 연동 | - `index.html`, `src/App.jsx`, `src/App.css` 구조화<br>- `otpauth://` 표준 URI 및 DOM 인라인 SVG QR 렌더링<br>- 30초 주기 동기화 루프 및 보안 분리 UI | ✅ 완료 |
+| **Phase 3** | 실전 로그인 시뮬레이터 & 검증 | - 1단계 자격증명 폼 $\rightarrow$ 2단계 6자리 분할 OTP 입력 모달 구현<br>- $\pm 1$ 타임스텝($T-1, T, T+1$) 시계 오차 허용 판정<br>- 인증 인가 대시보드 및 실시간 보안 감사 로그 연동 | ✅ 완료 |
+| **Phase 4** | 보안 검증 및 빌드/배포 | - `oxlint` 린트 및 `vite build` 무결성 검증<br>- F12 Network 탭 무전송 검증 확인<br>- Git 커밋(`GEMINI.md` 규칙) 및 배포 준비 | ✅ 완료 |
+
+---
+
+## 🧪 6. 보안 점검 및 테스트 체크리스트 (Verification Checklist)
+
+- [x] **CSPRNG 검증**: 키 생성 시 `Math.random()` 호출이 없으며 `crypto.getRandomValues()`만 사용하는가?
+- [x] **RFC 6238 정밀도**: 테스트 벡터 및 실제 스마트폰 Authenticator 앱과 6자리 숫자가 오차 없이 일치하는가?
+- [x] **Zero-Transmission**: 개발자 도구(F12) Network 탭에서 키 생성 및 검증 시 외부 API 호출이 0건인가?
+- [x] **시계 오차 허용**: 직전($T-1$) 및 다음($T+1$) 타임스텝 코드 입력 시 정상적으로 인가 판정되는가?
+- [x] **3개 파일 분리**: HTML, JS/JSX, CSS의 관심사 분리가 명확하고 유지보수 가능한가?
