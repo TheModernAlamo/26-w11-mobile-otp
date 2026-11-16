@@ -19,7 +19,11 @@ import {
   Terminal,
   Sparkles,
   Info,
-  CheckCircle2
+  CheckCircle2,
+  HelpCircle,
+  ChevronDown,
+  ChevronUp,
+  RotateCcw
 } from 'lucide-react'
 import './App.css'
 
@@ -155,7 +159,7 @@ async function verifyTOTPCode(inputCode, secretBase32, currentStep) {
 }
 
 export default function App() {
-  // 활성 뷰: 'dual' (QR 등록 + 실전 로그인), 'security' (보안 아키텍처/무전송 검증)
+  // 활성 뷰: 'dual' (스마트폰 연동 + 실전 로그인), 'security' (보안 아키텍처/무전송 검증)
   const [activeView, setActiveView] = useState('dual')
 
   // 발급자 및 계정 설정
@@ -163,13 +167,22 @@ export default function App() {
   const [account, setAccount] = useState('user@k-cybersec.ac.kr')
   const [secretKey, setSecretKey] = useState(() => generateBase32Secret(20))
 
-  // 현재 타임스텝 (내부 검증용 백그라운드 동기화, 화면 노출 안 함)
+  // 1. '스캔이 안 되나요?' 수동 키 토글 상태 (기본 숨김)
+  const [showManualKey, setShowManualKey] = useState(false)
+
+  // 2. 감사 로그 대시보드 토글 상태 (기본 숨김)
+  const [showAuditLogs, setShowAuditLogs] = useState(false)
+
+  // 3. 30초 쿨다운 & 재발급 타이머 상태
+  const [keyGeneratedAt, setKeyGeneratedAt] = useState(() => Date.now())
+  const [keyCooldown, setKeyCooldown] = useState(30)
+
+  // 현재 타임스텝 (내부 검증용 백그라운드 동기화)
   const [currentStep, setCurrentStep] = useState(() => Math.floor(Date.now() / 1000 / 30))
   const [copiedKey, setCopiedKey] = useState(false)
   const [copiedUri, setCopiedUri] = useState(false)
 
   // 로그인 시뮬레이터 상태
-  // stage: 'credentials' (1단계 ID/PW) | '2fa' (2단계 OTP) | 'dashboard' (인증 성공)
   const [loginStage, setLoginStage] = useState('credentials')
   const [username, setUsername] = useState('cybersec_admin')
   const [password, setPassword] = useState('password123!')
@@ -192,32 +205,45 @@ export default function App() {
   // RFC 6238 표준 URI (스마트폰 앱 연동용)
   const otpauthUri = `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(account)}?secret=${secretKey}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`
 
-  // 새 비밀 키 발급
+  // 30초 경과 시에만 새 비밀 키 재발급 허용
   const handleRegenerateKey = useCallback(() => {
+    const elapsed = Math.floor((Date.now() - keyGeneratedAt) / 1000)
+    if (elapsed < 30) {
+      alert(`키 발급 후 30초가 지나야 재발급할 수 있습니다. (${30 - elapsed}초 남음)`)
+      return
+    }
+
     const newKey = generateBase32Secret(20)
     setSecretKey(newKey)
+    setKeyGeneratedAt(Date.now())
+    setKeyCooldown(30)
     setVerificationResult(null)
     setAuditLogs((prev) => [
       {
         id: Date.now(),
         timestamp: new Date().toLocaleTimeString(),
-        event: '새 Base32 비밀 키 발급 (160비트 암호학적 엔트로피 풀 생성)',
+        event: '30초 경과 확인: 새 Base32 비밀 키 재발급 (160비트 암호학적 엔트로피 풀 생성)',
         status: 'warning'
       },
       ...prev
     ])
-  }, [])
+  }, [keyGeneratedAt])
 
-  // 1초 주기로 타임스텝 업데이트 (내부 검증용)
+  // 1초 주기로 타임스텝 및 30초 키 쿨다운 타이머 갱신
   useEffect(() => {
     const interval = setInterval(() => {
-      const nowSec = Math.floor(Date.now() / 1000)
+      const nowMs = Date.now()
+      const nowSec = Math.floor(nowMs / 1000)
       const step = Math.floor(nowSec / 30)
       setCurrentStep(step)
+
+      const elapsed = Math.floor((nowMs - keyGeneratedAt) / 1000)
+      const remaining = Math.max(0, 30 - elapsed)
+      setKeyCooldown(remaining)
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [])
+  }, [keyGeneratedAt])
 
   // 클립보드 복사 헬퍼
   const handleCopy = (text, setCopiedFn) => {
@@ -288,6 +314,15 @@ export default function App() {
     setOtpInputs(newInputs)
     const nextIdx = Math.min(digits.length, 5)
     otpInputRefs.current[nextIdx]?.focus()
+  }
+
+  // OTP 인증 재시도 핸들러
+  const handleRetryVerification = () => {
+    setOtpInputs(['', '', '', '', '', ''])
+    setVerificationResult(null)
+    setTimeout(() => {
+      otpInputRefs.current[0]?.focus()
+    }, 100)
   }
 
   // 2FA 검증 수행
@@ -418,7 +453,7 @@ export default function App() {
       <main className="main-content">
         {activeView === 'dual' && (
           <div className="dual-studio-container">
-            {/* ================= 좌측: 스마트폰 QR 코드 연동 & 키 발급 센터 ================= */}
+            {/* ================= 좌측: 스마트폰 QR 코드 연동 & 키 등록 센터 ================= */}
             <section className="studio-col qr-sync-panel">
               <div className="card h-full">
                 <div className="card-header">
@@ -427,13 +462,25 @@ export default function App() {
                     <h2 className="card-title">
                       <QrCode size={22} className="text-cyan" /> 스마트폰 QR 코드 연동
                     </h2>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={handleRegenerateKey}
-                      title="160비트 암호학적 난수로 새 키 생성"
-                    >
-                      <RefreshCw size={14} /> 새 보안 키 발급
-                    </button>
+
+                    {/* 3. 30초 경과 시에만 재발급 버튼 활성화 */}
+                    {keyCooldown === 0 ? (
+                      <button
+                        className="btn btn-primary btn-sm pulse-btn"
+                        onClick={handleRegenerateKey}
+                        title="30초 경과 확인됨 - 클릭 시 새 비밀 키를 재발급합니다."
+                      >
+                        <RefreshCw size={14} /> 새 보안 키 재발급
+                      </button>
+                    ) : (
+                      <button
+                        className="btn btn-secondary btn-sm disabled-timer-btn"
+                        disabled
+                        title={`30초 주기 보호: ${keyCooldown}초 후에 재발급할 수 있습니다.`}
+                      >
+                        <Clock size={14} /> 재발급 대기 ({keyCooldown}s)
+                      </button>
+                    )}
                   </div>
                   <p className="card-desc">
                     스마트폰의 Google Authenticator 또는 2FAS 앱으로 아래 QR 코드를 스캔하여 계정을 등록하세요.
@@ -458,6 +505,84 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* 1. '스캔이 안 되나요?' 토글 버튼 (누른 사람에게만 Secret Key 노출) */}
+                <div className="scan-trouble-box">
+                  <button
+                    type="button"
+                    className="btn-trouble-toggle"
+                    onClick={() => setShowManualKey(!showManualKey)}
+                  >
+                    <div className="btn-trouble-left">
+                      <HelpCircle size={16} className="text-cyan" />
+                      <span>스캔이 안 되나요? (수동 입력 설정 키 확인)</span>
+                    </div>
+                    {showManualKey ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </button>
+
+                  {/* 토글 활성화 시에만 펼쳐지는 수동 입력 Secret Key 영역 */}
+                  {showManualKey && (
+                    <div className="manual-key-drawer">
+                      <div className="drawer-header">
+                        <span className="drawer-title">
+                          <Key size={14} /> Base32 Secret Key (수동 설정 키)
+                        </span>
+                        <button
+                          className="btn-icon-copy"
+                          onClick={() => handleCopy(secretKey, setCopiedKey)}
+                        >
+                          {copiedKey ? <Check size={14} className="text-success" /> : <Copy size={14} />}
+                          <span>{copiedKey ? '복사됨' : '키 복사'}</span>
+                        </button>
+                      </div>
+
+                      <div className="secret-key-mono">
+                        {secretKey.match(/.{1,4}/g)?.join(' ') || secretKey}
+                      </div>
+                      <p className="manual-guide-text">
+                        스마트폰 Authenticator 앱에서 <strong>[설정 키 직접 입력]</strong>을 선택한 후 위 키를
+                        입력하세요.
+                      </p>
+
+                      {/* 발급자 및 계정 커스터마이징 */}
+                      <div className="issuer-account-inputs">
+                        <div className="input-inline">
+                          <label>발급자:</label>
+                          <input
+                            type="text"
+                            value={issuer}
+                            onChange={(e) => setIssuer(e.target.value)}
+                            placeholder="ZeroAuth"
+                          />
+                        </div>
+                        <div className="input-inline">
+                          <label>계정:</label>
+                          <input
+                            type="text"
+                            value={account}
+                            onChange={(e) => setAccount(e.target.value)}
+                            placeholder="user@k-cybersec.ac.kr"
+                          />
+                        </div>
+                      </div>
+
+                      {/* 표준 URI 복사 */}
+                      <div className="uri-mini-box">
+                        <div className="uri-mini-header">
+                          <span>표준 URI (otpauth://)</span>
+                          <button
+                            className="btn-text-sm"
+                            onClick={() => handleCopy(otpauthUri, setCopiedUri)}
+                          >
+                            {copiedUri ? <Check size={12} className="text-success" /> : <Copy size={12} />}
+                            <span>{copiedUri ? '복사됨' : 'URI 복사'}</span>
+                          </button>
+                        </div>
+                        <code className="uri-mini-code">{otpauthUri}</code>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* 스마트폰 연동 3단계 가이드 */}
                 <div className="enroll-steps-card">
                   <div className="enroll-steps-title">
@@ -480,7 +605,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 2FA 본질적 보안 원칙 안내 (화면에 번호를 노출하지 않는 이유) */}
+                {/* 2FA 보안 원칙 안내 */}
                 <div className="security-notice-card">
                   <div className="security-notice-header">
                     <ShieldCheck size={16} className="text-success" />
@@ -488,65 +613,9 @@ export default function App() {
                   </div>
                   <p className="security-notice-desc">
                     일회용 인증 번호(OTP)는 사용자가 직접 소유한 스마트폰 기기 내부에서만 독립적으로
-                    생성되며, 웹 브라우저 화면에는 노출되지 않습니다. 이를 통해 PC 화면이 캡처되거나
-                    비밀번호가 유출되더라도 계정을 안전하게 보호합니다.
+                    생성되며, 웹 브라우저 화면에는 노출되지 않습니다. 이를 통해 화면 캡처나 비밀번호
+                    유출 시에도 계정을 안전하게 보호합니다.
                   </p>
-                </div>
-
-                {/* Base32 Secret Key 및 발급자/계정 설정 */}
-                <div className="secret-meta-box">
-                  <div className="secret-meta-header">
-                    <span className="secret-meta-title">
-                      <Key size={14} /> Base32 Secret Key (160-bit Entropy)
-                    </span>
-                    <button
-                      className="btn-icon-copy"
-                      onClick={() => handleCopy(secretKey, setCopiedKey)}
-                    >
-                      {copiedKey ? <Check size={14} className="text-success" /> : <Copy size={14} />}
-                      <span>{copiedKey ? '복사됨' : '키 복사'}</span>
-                    </button>
-                  </div>
-                  <div className="secret-key-mono">
-                    {secretKey.match(/.{1,4}/g)?.join(' ') || secretKey}
-                  </div>
-
-                  {/* 발급자 및 계정 커스터마이징 */}
-                  <div className="issuer-account-inputs">
-                    <div className="input-inline">
-                      <label>발급자:</label>
-                      <input
-                        type="text"
-                        value={issuer}
-                        onChange={(e) => setIssuer(e.target.value)}
-                        placeholder="ZeroAuth"
-                      />
-                    </div>
-                    <div className="input-inline">
-                      <label>계정:</label>
-                      <input
-                        type="text"
-                        value={account}
-                        onChange={(e) => setAccount(e.target.value)}
-                        placeholder="user@k-cybersec.ac.kr"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* 표준 URI 복사 박스 */}
-                <div className="uri-mini-box">
-                  <div className="uri-mini-header">
-                    <span>표준 URI (otpauth://)</span>
-                    <button
-                      className="btn-text-sm"
-                      onClick={() => handleCopy(otpauthUri, setCopiedUri)}
-                    >
-                      {copiedUri ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-                      <span>{copiedUri ? '복사됨' : 'URI 복사'}</span>
-                    </button>
-                  </div>
-                  <code className="uri-mini-code">{otpauthUri}</code>
                 </div>
               </div>
             </section>
@@ -680,13 +749,21 @@ export default function App() {
                             <div>
                               <strong>인증 실패</strong>
                               <p>{verificationResult.reason}</p>
+                              {/* 실패 시 재시도 안내 */}
+                              <button
+                                type="button"
+                                className="btn-retry-inline"
+                                onClick={handleRetryVerification}
+                              >
+                                <RotateCcw size={13} /> 코드 다시 입력하기
+                              </button>
                             </div>
                           </>
                         )}
                       </div>
                     )}
 
-                    {/* 검증 버튼 */}
+                    {/* 검증 액션 버튼 */}
                     <div className="verify-actions-row">
                       <button
                         type="button"
@@ -756,19 +833,33 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 실시간 보안 감사 로그 */}
+                  {/* 2. 실시간 보안 감사 로그 토글 UI */}
                   <div className="audit-section">
-                    <h3 className="section-title">
-                      <Terminal size={17} /> 실시간 보안 감사 이벤트 로그 (Audit Trail)
-                    </h3>
-                    <div className="audit-log-list">
-                      {auditLogs.map((log) => (
-                        <div key={log.id} className={`audit-log-item log-${log.status}`}>
-                          <span className="log-time">[{log.timestamp}]</span>
-                          <span className="log-event">{log.event}</span>
-                        </div>
-                      ))}
+                    <div className="audit-header-row">
+                      <div className="section-title">
+                        <Terminal size={17} className="text-cyan" />
+                        <span>보안 감사 이벤트 로그 (Audit Trail)</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-audit-toggle"
+                        onClick={() => setShowAuditLogs(!showAuditLogs)}
+                      >
+                        <span>{showAuditLogs ? '로그 숨기기' : `로그 보기 (${auditLogs.length}건)`}</span>
+                        {showAuditLogs ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                      </button>
                     </div>
+
+                    {showAuditLogs && (
+                      <div className="audit-log-list animate-slide-down">
+                        {auditLogs.map((log) => (
+                          <div key={log.id} className={`audit-log-item log-${log.status}`}>
+                            <span className="log-time">[{log.timestamp}]</span>
+                            <span className="log-event">{log.event}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
