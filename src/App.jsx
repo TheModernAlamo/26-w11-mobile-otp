@@ -18,7 +18,8 @@ import {
   Smartphone,
   Terminal,
   Sparkles,
-  Info
+  Info,
+  CheckCircle2
 } from 'lucide-react'
 import './App.css'
 
@@ -78,7 +79,7 @@ function base32ToBytes(base32Str) {
 
 /**
  * 특정 타임스텝(timeStep)에 대한 6자리 TOTP 코드 연산 (RFC 6238 / RFC 4226)
- * Web Crypto API (HMAC-SHA1) 활용
+ * Web Crypto API (HMAC-SHA1) 활용 - 검증 시 백그라운드에서만 수행됨
  */
 async function computeTOTP(secretBase32, timeStep) {
   try {
@@ -154,7 +155,7 @@ async function verifyTOTPCode(inputCode, secretBase32, currentStep) {
 }
 
 export default function App() {
-  // 활성 뷰: 'dual' (QR 등록 + 실전 로그인 2-in-1), 'security' (보안 아키텍처/무전송 검증)
+  // 활성 뷰: 'dual' (QR 등록 + 실전 로그인), 'security' (보안 아키텍처/무전송 검증)
   const [activeView, setActiveView] = useState('dual')
 
   // 발급자 및 계정 설정
@@ -162,14 +163,9 @@ export default function App() {
   const [account, setAccount] = useState('user@k-cybersec.ac.kr')
   const [secretKey, setSecretKey] = useState(() => generateBase32Secret(20))
 
-  // 실시간 타이머 및 TOTP 상태
+  // 현재 타임스텝 (내부 검증용 백그라운드 동기화, 화면 노출 안 함)
   const [currentStep, setCurrentStep] = useState(() => Math.floor(Date.now() / 1000 / 30))
-  const [remainingSeconds, setRemainingSeconds] = useState(() => 30 - (Math.floor(Date.now() / 1000) % 30))
-  const [activeOtp, setActiveOtp] = useState('------')
-  const [prevOtp, setPrevOtp] = useState('------')
-  const [nextOtp, setNextOtp] = useState('------')
   const [copiedKey, setCopiedKey] = useState(false)
-  const [copiedOtp, setCopiedOtp] = useState(false)
   const [copiedUri, setCopiedUri] = useState(false)
 
   // 로그인 시뮬레이터 상태
@@ -185,7 +181,7 @@ export default function App() {
     {
       id: 1,
       timestamp: new Date().toLocaleTimeString(),
-      event: '시스템 초기화 완료: Zero-Transmission Web Crypto 활성화',
+      event: '시스템 초기화: Zero-Transmission Web Crypto 엔진 로드',
       status: 'info'
     }
   ])
@@ -205,49 +201,23 @@ export default function App() {
       {
         id: Date.now(),
         timestamp: new Date().toLocaleTimeString(),
-        event: '새 Base32 비밀 키 생성 (160비트 암호학적 엔트로피 풀 발급)',
+        event: '새 Base32 비밀 키 발급 (160비트 암호학적 엔트로피 풀 생성)',
         status: 'warning'
       },
       ...prev
     ])
   }, [])
 
-  // 1초 주기로 실시간 타이머 및 타임스텝 업데이트
+  // 1초 주기로 타임스텝 업데이트 (내부 검증용)
   useEffect(() => {
     const interval = setInterval(() => {
       const nowSec = Math.floor(Date.now() / 1000)
       const step = Math.floor(nowSec / 30)
-      const remain = 30 - (nowSec % 30)
-
-      setRemainingSeconds(remain)
       setCurrentStep(step)
     }, 1000)
 
     return () => clearInterval(interval)
   }, [])
-
-  // 타임스텝 또는 비밀 키 변경 시 6자리 OTP 재연산
-  useEffect(() => {
-    let isCancelled = false
-
-    async function updateOtps() {
-      const [current, past, future] = await Promise.all([
-        computeTOTP(secretKey, currentStep),
-        computeTOTP(secretKey, currentStep - 1),
-        computeTOTP(secretKey, currentStep + 1)
-      ])
-      if (!isCancelled) {
-        setActiveOtp(current)
-        setPrevOtp(past)
-        setNextOtp(future)
-      }
-    }
-
-    updateOtps()
-    return () => {
-      isCancelled = true
-    }
-  }, [secretKey, currentStep])
 
   // 클립보드 복사 헬퍼
   const handleCopy = (text, setCopiedFn) => {
@@ -320,15 +290,6 @@ export default function App() {
     otpInputRefs.current[nextIdx]?.focus()
   }
 
-  // 빠른 채우기 (현재 PC 번호 자동 입력)
-  const handleQuickFill = () => {
-    if (activeOtp && activeOtp !== '------') {
-      const digits = activeOtp.split('')
-      setOtpInputs(digits)
-      otpInputRefs.current[5]?.focus()
-    }
-  }
-
   // 2FA 검증 수행
   const executeVerification = async () => {
     const fullCode = otpInputs.join('')
@@ -362,7 +323,7 @@ export default function App() {
           {
             id: Date.now(),
             timestamp: new Date().toLocaleTimeString(),
-            event: `2단계 인증 성공 (${result.label}): 사용자 [${username}] 보안 대시보드 인가`,
+            event: `2단계 인증 성공 (${result.label}): 스마트폰 OTP 검증 통과 - 사용자 [${username}] 인가`,
             status: 'success'
           },
           ...prev
@@ -402,10 +363,6 @@ export default function App() {
     ])
   }
 
-  // 원형 타이머 계산
-  const timerPercent = (remainingSeconds / 30) * 100
-  const timerColor = remainingSeconds <= 5 ? '#ef4444' : remainingSeconds <= 10 ? '#f59e0b' : '#10b981'
-
   return (
     <div className="app-container">
       {/* ================= HEADER ================= */}
@@ -420,7 +377,7 @@ export default function App() {
               <span className="badge badge-cyber">RFC 6238 TOTP</span>
             </div>
             <p className="brand-subtitle">
-              Zero-Transmission 클라이언트 사이드 암호화 2단계 인증 (QR 연동 & 실시간 동기화)
+              Zero-Transmission 클라이언트 사이드 암호화 2단계 인증 시스템
             </p>
           </div>
         </div>
@@ -429,7 +386,7 @@ export default function App() {
         <div className="header-status-box">
           <div className="status-item">
             <span className="status-dot active"></span>
-            <span className="status-text">Zero-Transmission: Web Crypto API 로컬 연산 (네트워크 전송 0건)</span>
+            <span className="status-text">Zero-Transmission: Web Crypto 로컬 연산 (네트워크 전송 0건)</span>
           </div>
           <div className="status-item">
             <span className="status-dot secure"></span>
@@ -445,8 +402,7 @@ export default function App() {
           onClick={() => setActiveView('dual')}
         >
           <Sparkles size={18} />
-          <span>2FA 스튜디오 (QR 연동 + 실전 로그인 2-in-1)</span>
-          <span className="tab-pill-timer">{remainingSeconds}s</span>
+          <span>2FA 스튜디오 (스마트폰 연동 & 실전 로그인)</span>
         </button>
 
         <button
@@ -462,14 +418,14 @@ export default function App() {
       <main className="main-content">
         {activeView === 'dual' && (
           <div className="dual-studio-container">
-            {/* ================= 좌측: QR 코드 연동 & 실시간 동기화 센터 ================= */}
+            {/* ================= 좌측: 스마트폰 QR 코드 연동 & 키 발급 센터 ================= */}
             <section className="studio-col qr-sync-panel">
               <div className="card h-full">
                 <div className="card-header">
-                  <div className="card-badge">QR 코드 연동 및 키 발급 (Criterion 1, 2, 3)</div>
+                  <div className="card-badge">스마트폰 2FA 등록 센터 (Criterion 1 & 2)</div>
                   <div className="card-header-row">
                     <h2 className="card-title">
-                      <QrCode size={22} className="text-cyan" /> 스마트폰 QR 코드 연동 & 실시간 동기화
+                      <QrCode size={22} className="text-cyan" /> 스마트폰 QR 코드 연동
                     </h2>
                     <button
                       className="btn btn-secondary btn-sm"
@@ -480,11 +436,11 @@ export default function App() {
                     </button>
                   </div>
                   <p className="card-desc">
-                    스마트폰의 Google Authenticator 또는 2FAS 앱으로 아래 QR을 스캔하여 계정을 등록하세요.
+                    스마트폰의 Google Authenticator 또는 2FAS 앱으로 아래 QR 코드를 스캔하여 계정을 등록하세요.
                   </p>
                 </div>
 
-                {/* QR 코드 표시 영역 (항상 첫 화면에 표시됨!) */}
+                {/* 선명한 QR 코드 표시 영역 */}
                 <div className="qr-highlight-area">
                   <div className="qr-box-main">
                     <QRCodeSVG
@@ -502,82 +458,39 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 실시간 30초 동기화 & 실시간 6자리 코드 */}
-                <div className="live-sync-widget">
-                  <div className="live-sync-header">
-                    <div className="sync-title-box">
-                      <Clock size={16} className="text-success" />
-                      <span className="sync-title">실시간 30초 동기화 모니터</span>
-                    </div>
-                    <span className="epoch-badge">에포크 T = {currentStep}</span>
+                {/* 스마트폰 연동 3단계 가이드 */}
+                <div className="enroll-steps-card">
+                  <div className="enroll-steps-title">
+                    <Smartphone size={15} className="text-cyan" />
+                    <span>스마트폰 Authenticator 앱 연동 방법</span>
                   </div>
-
-                  <div className="sync-display-row">
-                    {/* 원형 카운트다운 타이머 */}
-                    <div className="circle-timer-wrap-mini">
-                      <svg className="timer-svg" width="80" height="80" viewBox="0 0 80 80">
-                        <circle
-                          className="timer-bg"
-                          cx="40"
-                          cy="40"
-                          r="34"
-                          strokeWidth="6"
-                          fill="transparent"
-                        />
-                        <circle
-                          className="timer-progress"
-                          cx="40"
-                          cy="40"
-                          r="34"
-                          strokeWidth="6"
-                          fill="transparent"
-                          stroke={timerColor}
-                          strokeDasharray={213.63}
-                          strokeDashoffset={213.63 - (213.63 * timerPercent) / 100}
-                          strokeLinecap="round"
-                        />
-                      </svg>
-                      <div className="timer-text-overlay-mini">
-                        <span className="timer-num-mini" style={{ color: timerColor }}>
-                          {remainingSeconds}
-                        </span>
-                        <span className="timer-unit-mini">초</span>
-                      </div>
+                  <div className="enroll-step-list">
+                    <div className="enroll-step-item">
+                      <span className="step-circle">1</span>
+                      <p>스마트폰에서 <strong>Google Authenticator</strong> 또는 <strong>2FAS</strong> 실행</p>
                     </div>
-
-                    {/* 실시간 6자리 예상 OTP 번호 */}
-                    <div className="otp-expected-display">
-                      <span className="otp-expected-label">스마트폰 앱과 일치하는 실시간 OTP:</span>
-                      <div className="otp-expected-digits">
-                        <span>{activeOtp.slice(0, 3)}</span>
-                        <span className="otp-space"> </span>
-                        <span>{activeOtp.slice(3, 6)}</span>
-                      </div>
-                      <button
-                        className="btn-copy-inline"
-                        onClick={() => handleCopy(activeOtp, setCopiedOtp)}
-                      >
-                        {copiedOtp ? <Check size={13} className="text-success" /> : <Copy size={13} />}
-                        <span>{copiedOtp ? '복사됨!' : '코드 복사'}</span>
-                      </button>
+                    <div className="enroll-step-item">
+                      <span className="step-circle">2</span>
+                      <p><strong>+ (추가)</strong> 버튼 $\rightarrow$ <strong>QR 코드 스캔</strong>으로 위 QR 스캔</p>
+                    </div>
+                    <div className="enroll-step-item">
+                      <span className="step-circle">3</span>
+                      <p>스마트폰 화면에 뜨는 <strong>6자리 번호</strong>를 확인하여 우측 로그인에 입력</p>
                     </div>
                   </div>
+                </div>
 
-                  {/* 시계 오차(±1스텝) 구간 미리보기 */}
-                  <div className="drift-row-strip">
-                    <div className="drift-cell">
-                      <span className="drift-tag">과거 T-1 (-30s)</span>
-                      <code>{prevOtp}</code>
-                    </div>
-                    <div className="drift-cell active-cell">
-                      <span className="drift-tag">현재 T (0s)</span>
-                      <code>{activeOtp}</code>
-                    </div>
-                    <div className="drift-cell">
-                      <span className="drift-tag">미래 T+1 (+30s)</span>
-                      <code>{nextOtp}</code>
-                    </div>
+                {/* 2FA 본질적 보안 원칙 안내 (화면에 번호를 노출하지 않는 이유) */}
+                <div className="security-notice-card">
+                  <div className="security-notice-header">
+                    <ShieldCheck size={16} className="text-success" />
+                    <strong>2단계 인증(소유 기반) 보안 원칙</strong>
                   </div>
+                  <p className="security-notice-desc">
+                    일회용 인증 번호(OTP)는 사용자가 직접 소유한 스마트폰 기기 내부에서만 독립적으로
+                    생성되며, 웹 브라우저 화면에는 노출되지 않습니다. 이를 통해 PC 화면이 캡처되거나
+                    비밀번호가 유출되더라도 계정을 안전하게 보호합니다.
+                  </p>
                 </div>
 
                 {/* Base32 Secret Key 및 발급자/계정 설정 */}
@@ -598,7 +511,7 @@ export default function App() {
                     {secretKey.match(/.{1,4}/g)?.join(' ') || secretKey}
                   </div>
 
-                  {/* 발급자 및 계정 수정 입력 */}
+                  {/* 발급자 및 계정 커스터마이징 */}
                   <div className="issuer-account-inputs">
                     <div className="input-inline">
                       <label>발급자:</label>
@@ -649,7 +562,7 @@ export default function App() {
                       <LogIn size={22} className="text-primary" /> 서비스 포털 로그인
                     </h2>
                     <p className="card-desc">
-                      아이디와 비밀번호로 1차 로그인한 후, 왼쪽에서 스캔한 2단계 OTP 인증을 진행합니다.
+                      아이디와 비밀번호로 1차 로그인한 후, 스마트폰 앱의 2단계 OTP 인증을 진행합니다.
                     </p>
                   </div>
 
@@ -687,10 +600,10 @@ export default function App() {
                     <div className="info-guide-card">
                       <Info size={16} className="text-cyan" />
                       <div>
-                        <strong>빠른 테스트 안내:</strong>
+                        <strong>실전 로그인 가이드:</strong>
                         <p>
-                          스마트폰에서 왼쪽 QR 코드를 스캔한 뒤, 바로 아래 버튼을 눌러 2단계 인증 모달로
-                          진입하세요.
+                          스마트폰에서 왼쪽 QR 코드를 스캔해 계정을 추가한 뒤, 아래 버튼을 눌러 2단계
+                          인증 코드를 입력하세요.
                         </p>
                       </div>
                     </div>
@@ -711,10 +624,11 @@ export default function App() {
                   <div className="card-header">
                     <div className="card-badge text-cyan">2단계 본인 인증 (Step 2 / 2)</div>
                     <h2 className="card-title">
-                      <ShieldCheck size={22} className="text-success" /> 2단계 TOTP 인증 코드 검증
+                      <ShieldCheck size={22} className="text-success" /> 스마트폰 OTP 6자리 입력
                     </h2>
                     <p className="card-desc">
-                      스마트폰 Authenticator 앱(또는 왼쪽 화면)에 표시된 6자리 번호를 입력하세요.
+                      스마트폰 <strong>Google Authenticator</strong> 또는 <strong>2FAS</strong> 앱에
+                      표시된 6자리 번호를 입력하세요.
                     </p>
                   </div>
 
@@ -739,18 +653,9 @@ export default function App() {
                       ))}
                     </div>
 
-                    {/* 빠른 테스트 자동 채우기 버튼 */}
-                    <div className="quick-fill-row">
-                      <button
-                        type="button"
-                        className="btn-quick-fill"
-                        onClick={handleQuickFill}
-                        title="현재 생성된 6자리 번호를 자동으로 채웁니다."
-                      >
-                        <Terminal size={14} /> 현재 코드({activeOtp}) 자동 입력 (빠른 테스트)
-                      </button>
+                    <div className="otp-helper-row">
                       <span className="clock-drift-pill">
-                        <Clock size={12} /> $\pm 1$스텝($\pm 30$초) 시계 오차 허용
+                        <Clock size={13} className="text-cyan" /> $\pm 1$스텝($\pm 30$초) 시계 오차 자동 허용
                       </span>
                     </div>
 
@@ -766,7 +671,7 @@ export default function App() {
                             <ShieldCheck size={20} />
                             <div>
                               <strong>인증 성공!</strong>
-                              <p>{verificationResult.label}에서 코드가 일치했습니다.</p>
+                              <p>{verificationResult.label}에서 일치 확인되었습니다.</p>
                             </div>
                           </>
                         ) : (
@@ -803,7 +708,7 @@ export default function App() {
                           </>
                         ) : (
                           <>
-                            <ShieldCheck size={18} />
+                            <CheckCircle2 size={18} />
                             <span>인증 확인</span>
                           </>
                         )}

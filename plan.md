@@ -33,10 +33,10 @@
   $$\text{otpauth://totp/Issuer:Account?secret=SECRET\&issuer=Issuer}$$
 - **연동 기능**: DOM 상에 스캔 가능한 QR 코드를 직접 생성(SVG/Canvas)하여, 사용자가 스마트폰 표준 인증기 앱(Google Authenticator, Microsoft Authenticator, 2FAS, Authy 등)으로 즉시 등록할 수 있도록 지원합니다.
 
-### 3. 실시간 동기화 (Real-Time Synchronization)
-- **타이밍 에포크 (Timing Epoch)**: 표준 30초 UNIX 타임스탬프 윈도우와 동기화됩니다.
+### 3. 실시간 동기화 및 2FA 보안 분리 (Real-Time Synchronization & Possession Factor)
+- **타이밍 에포크 (Timing Epoch)**: 표준 30초 UNIX 타임스탬프 윈도우와 내부 백그라운드에서 동기화됩니다.
   $$T = \lfloor \text{Current Time (Seconds)} / 30 \rfloor$$
-- **실시간 인터페이스**: 동적인 30초 카운트다운 타이머(원형/바)를 제공하며, 모바일 인증기 앱과 완전히 일치하도록 활성 6자리 코드를 실시간 자동 갱신합니다.
+- **보안 분리 원칙 (Out-of-Band Possession Factor)**: 실시간 OTP 번호와 동기화 타이머는 **웹 브라우저 화면에 출력하지 않습니다**. 웹 화면에 OTP 코드가 출력되면 2단계 인증(소유 기반 인증)의 본질적 보안 가치가 상실되므로, 코드는 오직 사용자의 **스마트폰 Authenticator 앱에서만 생성·확인**되며 웹 시스템은 검증 시점에만 백그라운드로 동기화 계산을 수행합니다.
 
 ### 4. 코드 검증 (Code Verification)
 - **검증 로직**: 사용자가 입력한 6자리 코드와 로컬에서 계산된 TOTP 값을 비교하여 일치 여부를 판정합니다.

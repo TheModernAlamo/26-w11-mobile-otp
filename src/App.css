@@ -165,20 +165,10 @@
   border-radius: 8px 8px 0 0;
 }
 
-.tab-pill-timer {
-  background: rgba(16, 185, 129, 0.2);
-  color: var(--success);
-  font-size: 11px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-family: var(--font-mono);
-  font-weight: 700;
-}
-
 /* ================= DUAL STUDIO 2-IN-1 LAYOUT ================= */
 .dual-studio-container {
   display: grid;
-  grid-template-columns: 1.05fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 24px;
   align-items: stretch;
 }
@@ -250,7 +240,7 @@
   border: 1px dashed rgba(56, 189, 248, 0.4);
   border-radius: 14px;
   padding: 18px;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .qr-box-main {
@@ -271,171 +261,85 @@
   color: #38bdf8;
 }
 
-/* 실시간 동기화 위젯 */
-.live-sync-widget {
+/* 스마트폰 등록 가이드 */
+.enroll-steps-card {
   background: #0d131f;
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 16px;
-}
-
-.live-sync-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.sync-title-box {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.sync-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: #ffffff;
-}
-
-.epoch-badge {
-  font-size: 11px;
-  color: var(--text-sub);
-  font-family: var(--font-mono);
-}
-
-.sync-display-row {
-  display: flex;
-  align-items: center;
-  gap: 18px;
+  border-radius: 10px;
+  padding: 14px;
   margin-bottom: 14px;
 }
 
-/* 원형 카운트다운 타이머 미니 */
-.circle-timer-wrap-mini {
-  position: relative;
-  width: 80px;
-  height: 80px;
-  flex-shrink: 0;
-}
-
-.timer-svg {
-  transform: rotate(-90deg);
-}
-
-.timer-bg {
-  stroke: rgba(255, 255, 255, 0.08);
-}
-
-.timer-progress {
-  transition: stroke-dashoffset 1s linear, stroke 0.3s ease;
-}
-
-.timer-text-overlay-mini {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+.enroll-steps-title {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 10px;
 }
 
-.timer-num-mini {
-  font-size: 20px;
-  font-weight: 800;
-  font-family: var(--font-mono);
-  line-height: 1;
-}
-
-.timer-unit-mini {
-  font-size: 10px;
-  color: var(--text-muted);
-}
-
-.otp-expected-display {
-  flex: 1;
+.enroll-step-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
 
-.otp-expected-label {
+.enroll-step-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   font-size: 12px;
   color: var(--text-muted);
+  line-height: 1.4;
 }
 
-.otp-expected-digits {
-  font-family: var(--font-mono);
-  font-size: 32px;
-  font-weight: 800;
-  color: #38bdf8;
-  letter-spacing: 3px;
-  line-height: 1.1;
-  text-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
+.enroll-step-item p {
+  flex: 1;
 }
 
-.btn-copy-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--border-color);
-  color: var(--text-muted);
-  padding: 3px 8px;
-  border-radius: 5px;
-  font-size: 11px;
-  cursor: pointer;
-  align-self: flex-start;
-  margin-top: 4px;
-  transition: all 0.2s;
+.enroll-step-item strong {
+  color: #f1f5f9;
 }
 
-.btn-copy-inline:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
-}
-
-.drift-row-strip {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 6px;
-  background: var(--bg-input);
-  border-radius: 8px;
-  padding: 8px;
-  font-size: 11px;
-}
-
-.drift-cell {
+.step-circle {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  padding: 4px;
-  border-radius: 6px;
-}
-
-.drift-cell.active-cell {
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.3);
-}
-
-.drift-cell.active-cell code {
-  color: #34d399;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: #1e3a8a;
+  color: #38bdf8;
+  border-radius: 50%;
+  font-size: 11px;
   font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 1px;
 }
 
-.drift-tag {
-  color: var(--text-sub);
-  font-size: 10px;
+/* 2FA 보안 원칙 알림 카드 */
+.security-notice-card {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
 }
 
-.drift-cell code {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--text-muted);
+.security-notice-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #34d399;
+  margin-bottom: 4px;
+}
+
+.security-notice-desc {
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.5;
 }
 
 /* Secret Key Box */
@@ -648,28 +552,9 @@
   75% { transform: translateX(6px); }
 }
 
-.quick-fill-row {
+.otp-helper-row {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.btn-quick-fill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: none;
-  border: none;
-  color: #38bdf8;
-  cursor: pointer;
-  font-size: 12px;
-  text-align: left;
-  padding: 4px 0;
-}
-
-.btn-quick-fill:hover {
-  color: #7dd3fc;
-  text-decoration: underline;
+  justify-content: flex-end;
 }
 
 .clock-drift-pill {
@@ -1119,9 +1004,5 @@
     width: 42px;
     height: 52px;
     font-size: 20px;
-  }
-  .sync-display-row {
-    flex-direction: column;
-    align-items: flex-start;
   }
 }
